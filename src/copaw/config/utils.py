@@ -24,7 +24,8 @@ def _normalize_working_dir_bound_paths(data: object) -> object:
     """Normalize legacy ~/.copaw-bound paths to current WORKING_DIR.
 
     This keeps COPAW_WORKING_DIR effective even if user config files contain
-    older hard-coded paths like "~/.copaw/media" or "/Users/x/.copaw/workspaces/...".
+    older hard-coded paths like "~/.copaw/media" or
+    "/Users/x/.copaw/workspaces/...".
     Only rewrites known working-dir-bound keys.
     """
     legacy_root_tilde = "~/.copaw"

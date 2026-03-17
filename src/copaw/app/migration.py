@@ -281,7 +281,9 @@ def ensure_default_agent_exists() -> None:
         default_workspace = Path(agent_ref.workspace_dir).expanduser()
         agent_existed = True
     else:
-        default_workspace = Path(f"{WORKING_DIR}/workspaces/default").expanduser()
+        default_workspace = Path(
+            f"{WORKING_DIR}/workspaces/default",
+        ).expanduser()
         agent_existed = False
 
     # Ensure workspace directory exists
