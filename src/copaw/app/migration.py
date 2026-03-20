@@ -20,7 +20,13 @@ from ..config.utils import load_config, save_config
 
 logger = logging.getLogger(__name__)
 
-_LEGACY_DEFAULT_WORKING_DIR = Path("~/.copaw").expanduser().resolve()
+_LEGACY_DEFAULT_WORKING_DIR = (
+    Path(
+        WORKING_DIR,
+    )
+    .expanduser()
+    .resolve()
+)
 
 # Workspace items to migrate: (name, is_directory)
 _WORKSPACE_ITEMS_TO_MIGRATE = [
