@@ -5,7 +5,6 @@ Handles migration from legacy single-agent config to new multi-agent structure.
 """
 import json
 import logging
-import os
 import shutil
 from pathlib import Path
 
@@ -21,15 +20,28 @@ from ..config.utils import load_config, save_config
 
 logger = logging.getLogger(__name__)
 
-# Allow overriding the legacy default working dir via env.
-# This keeps backward compatibility when the env var is not set.
-_LEGACY_DEFAULT_WORKING_DIR = (
-    Path(
-        os.environ.get("COPAW_LEGACY_WORKING_DIR", "~/.copaw"),
-    )
-    .expanduser()
-    .resolve()
-)
+_LEGACY_DEFAULT_WORKING_DIR = Path("~/.copaw").expanduser().resolve()
+
+# Workspace items to migrate: (name, is_directory)
+_WORKSPACE_ITEMS_TO_MIGRATE = [
+    # Directories
+    ("sessions", True),
+    ("memory", True),
+    ("active_skills", True),
+    ("customized_skills", True),
+    # Files
+    ("chats.json", False),
+    ("jobs.json", False),
+    ("feishu_receive_ids.json", False),
+    ("dingtalk_session_webhooks.json", False),
+    # Markdown files
+    ("AGENTS.md", False),
+    ("SOUL.md", False),
+    ("PROFILE.md", False),
+    ("HEARTBEAT.md", False),
+    ("MEMORY.md", False),
+    ("BOOTSTRAP.md", False),
+]
 
 
 def migrate_legacy_workspace_to_default_agent() -> bool:
@@ -255,28 +267,6 @@ def _migrate_workspace_item(
         logger.debug(f"Migrated {item_name}")
     except Exception as e:
         logger.warning(f"Failed to migrate {item_name}: {e}")
-
-
-# Workspace items to migrate: (name, is_directory)
-_WORKSPACE_ITEMS_TO_MIGRATE = [
-    # Directories
-    ("sessions", True),
-    ("memory", True),
-    ("active_skills", True),
-    ("customized_skills", True),
-    # Files
-    ("chats.json", False),
-    ("jobs.json", False),
-    ("feishu_receive_ids.json", False),
-    ("dingtalk_session_webhooks.json", False),
-    # Markdown files
-    ("AGENTS.md", False),
-    ("SOUL.md", False),
-    ("PROFILE.md", False),
-    ("HEARTBEAT.md", False),
-    ("MEMORY.md", False),
-    ("BOOTSTRAP.md", False),
-]
 
 
 def _migrate_workspace_items_from_source(
