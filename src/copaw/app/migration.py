@@ -121,90 +121,29 @@ def migrate_legacy_workspace_to_default_agent() -> bool:
         )
     logger.info(f"Created agent config: {agent_config_path}")
 
-    # Migrate existing workspace files from legacy default working dir.
-    # When COPAW_WORKING_DIR is customized, historical data may still exist
-    # under "~/.copaw".
-    old_workspace = _LEGACY_DEFAULT_WORKING_DIR
-
+    # Migrate existing workspace files from legacy locations.
+    # Two scenarios to handle:
+    # 1. User moved from local (~/.copaw) to custom WORKING_DIR (e.g., Docker)
+    #    -> data may still be in ~/.copaw
+    # 2. Docker environment using custom WORKING_DIR from the start
+    #    -> data is in WORKING_DIR root (not yet in workspaces/default/)
     migrated_items = []
 
-    # Migrate sessions directory
-    _migrate_workspace_item(
-        old_workspace / "sessions",
-        default_workspace / "sessions",
-        "sessions",
-        migrated_items,
-    )
-
-    # Migrate memory directory
-    _migrate_workspace_item(
-        old_workspace / "memory",
-        default_workspace / "memory",
-        "memory",
-        migrated_items,
-    )
-
-    # Migrate chats.json
-    _migrate_workspace_item(
-        old_workspace / "chats.json",
-        default_workspace / "chats.json",
-        "chats.json",
-        migrated_items,
-    )
-
-    # Migrate jobs.json
-    _migrate_workspace_item(
-        old_workspace / "jobs.json",
-        default_workspace / "jobs.json",
-        "jobs.json",
-        migrated_items,
-    )
-
-    # Migrate markdown files
-    for md_file in [
-        "AGENTS.md",
-        "SOUL.md",
-        "PROFILE.md",
-        "HEARTBEAT.md",
-        "MEMORY.md",
-        "BOOTSTRAP.md",
-    ]:
-        _migrate_workspace_item(
-            old_workspace / md_file,
-            default_workspace / md_file,
-            md_file,
+    if WORKING_DIR != _LEGACY_DEFAULT_WORKING_DIR:
+        # Custom WORKING_DIR: check both WORKING_DIR root and ~/.copaw
+        # Priority: WORKING_DIR root first (current data), then legacy
+        _migrate_workspace_items_from_multiple_sources(
+            [WORKING_DIR, _LEGACY_DEFAULT_WORKING_DIR],
+            default_workspace,
             migrated_items,
         )
-
-    # Migrate skills directories
-    _migrate_workspace_item(
-        old_workspace / "active_skills",
-        default_workspace / "active_skills",
-        "active_skills",
-        migrated_items,
-    )
-
-    _migrate_workspace_item(
-        old_workspace / "customized_skills",
-        default_workspace / "customized_skills",
-        "customized_skills",
-        migrated_items,
-    )
-
-    # Migrate channel-specific configuration files
-    _migrate_workspace_item(
-        old_workspace / "feishu_receive_ids.json",
-        default_workspace / "feishu_receive_ids.json",
-        "feishu_receive_ids.json",
-        migrated_items,
-    )
-
-    _migrate_workspace_item(
-        old_workspace / "dingtalk_session_webhooks.json",
-        default_workspace / "dingtalk_session_webhooks.json",
-        "dingtalk_session_webhooks.json",
-        migrated_items,
-    )
+    else:
+        # Standard migration from ~/.copaw only
+        _migrate_workspace_items_from_source(
+            _LEGACY_DEFAULT_WORKING_DIR,
+            default_workspace,
+            migrated_items,
+        )
 
     if migrated_items:
         logger.info(f"Migrated workspace items: {', '.join(migrated_items)}")
@@ -279,6 +218,87 @@ def _migrate_workspace_item(
         logger.debug(f"Migrated {item_name}")
     except Exception as e:
         logger.warning(f"Failed to migrate {item_name}: {e}")
+
+
+# Workspace items to migrate: (name, is_directory)
+_WORKSPACE_ITEMS_TO_MIGRATE = [
+    # Directories
+    ("sessions", True),
+    ("memory", True),
+    ("active_skills", True),
+    ("customized_skills", True),
+    # Files
+    ("chats.json", False),
+    ("jobs.json", False),
+    ("feishu_receive_ids.json", False),
+    ("dingtalk_session_webhooks.json", False),
+    # Markdown files
+    ("AGENTS.md", False),
+    ("SOUL.md", False),
+    ("PROFILE.md", False),
+    ("HEARTBEAT.md", False),
+    ("MEMORY.md", False),
+    ("BOOTSTRAP.md", False),
+]
+
+
+def _migrate_workspace_items_from_source(
+    source_dir: Path,
+    target_dir: Path,
+    migrated_items: list,
+) -> None:
+    """Migrate all workspace items from a single source directory.
+
+    Args:
+        source_dir: Source directory (e.g., ~/.copaw or WORKING_DIR)
+        target_dir: Target directory (e.g., workspaces/default/)
+        migrated_items: List to append migrated item names
+    """
+    for item_name, _ in _WORKSPACE_ITEMS_TO_MIGRATE:
+        _migrate_workspace_item(
+            source_dir / item_name,
+            target_dir / item_name,
+            item_name,
+            migrated_items,
+        )
+
+
+def _migrate_workspace_items_from_multiple_sources(
+    source_dirs: list[Path],
+    target_dir: Path,
+    migrated_items: list,
+) -> None:
+    """Migrate workspace items from multiple possible source directories.
+
+    Checks each source in order and migrates from the first one that exists.
+    This handles both:
+    - Docker: data in WORKING_DIR root (/app/working/sessions/)
+    - Local: data in ~/.copaw after user customized WORKING_DIR
+
+    Args:
+        source_dirs: List of possible source directories (in priority order)
+        target_dir: Target directory (e.g., workspaces/default/)
+        migrated_items: List to append migrated item names
+    """
+    for item_name, _ in _WORKSPACE_ITEMS_TO_MIGRATE:
+        target_path = target_dir / item_name
+
+        # Skip if already exists in target
+        if target_path.exists():
+            logger.debug(f"Skipping {item_name} (already exists in target)")
+            continue
+
+        # Try each source in order
+        for source_dir in source_dirs:
+            source_path = source_dir / item_name
+            if source_path.exists():
+                _migrate_workspace_item(
+                    source_path,
+                    target_path,
+                    item_name,
+                    migrated_items,
+                )
+                break  # Move to next item once migrated
 
 
 def ensure_default_agent_exists() -> None:
