@@ -73,8 +73,31 @@ class ToolGuardMixin:
     # ------------------------------------------------------------------
 
     def _should_require_approval(self) -> bool:
-        """``True`` when a ``session_id`` is available for approval."""
-        return bool(self._request_context.get("session_id"))
+        """``True`` when the user must manually approve the call.
+
+        Returns ``False`` (auto-approve) when a confirmed plan is
+        executing — the user already gave consent by confirming.
+        Denied tools are still denied; they are checked earlier in
+        the pipeline, before this method is ever called.
+        """
+        if not self._request_context.get("session_id"):
+            return False
+
+        nb = getattr(self, "plan_notebook", None)
+        if (
+            nb is not None
+            and nb.current_plan is not None
+            and any(
+                st.state == "in_progress"
+                for st in nb.current_plan.subtasks
+            )
+        ):
+            logger.info(
+                "Auto-approved during plan execution",
+            )
+            return False
+
+        return True
 
     def _last_tool_response_is_denied(self) -> bool:
         """Check if the last message is a guard-denied tool result."""

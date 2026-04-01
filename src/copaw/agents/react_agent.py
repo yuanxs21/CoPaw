@@ -691,7 +691,7 @@ class CoPawAgent(ToolGuardMixin, ReActAgent):
         try:
             return await super()._reasoning(tool_choice=tool_choice)
         except Exception as e:
-            # --- Context overflow recovery ---
+            # --- Context overflow / ReadTimeout recovery ---
             if self._is_context_overflow_error(e):
                 n_trunc = self._emergency_truncate_tool_results()
                 if n_trunc > 0:
@@ -702,9 +702,15 @@ class CoPawAgent(ToolGuardMixin, ReActAgent):
                         e,
                         n_trunc,
                     )
-                    return await super()._reasoning(
-                        tool_choice=tool_choice,
+                else:
+                    logger.warning(
+                        "_reasoning: %s (no blocks to truncate), "
+                        "retrying anyway.",
+                        type(e).__name__,
                     )
+                return await super()._reasoning(
+                    tool_choice=tool_choice,
+                )
 
             # --- Media error recovery ---
             if not self._is_bad_request_or_media_error(e):
@@ -763,7 +769,7 @@ class CoPawAgent(ToolGuardMixin, ReActAgent):
             except Exception as e:
                 recovered = False
 
-                # --- Context overflow recovery ---
+                # --- Context overflow / ReadTimeout recovery ---
                 if self._is_context_overflow_error(e):
                     n_trunc = (
                         self._emergency_truncate_tool_results()
@@ -776,8 +782,15 @@ class CoPawAgent(ToolGuardMixin, ReActAgent):
                             e,
                             n_trunc,
                         )
-                        msg = await super()._summarizing()
-                        recovered = True
+                    else:
+                        logger.warning(
+                            "_summarizing: %s "
+                            "(no blocks to truncate), "
+                            "retrying anyway.",
+                            type(e).__name__,
+                        )
+                    msg = await super()._summarizing()
+                    recovered = True
 
                 if not recovered:
                     # --- Media error recovery ---
@@ -924,9 +937,17 @@ class CoPawAgent(ToolGuardMixin, ReActAgent):
 
     @staticmethod
     def _is_context_overflow_error(exc: Exception) -> bool:
-        """Return True for context-too-large / buffer-overflow errors."""
+        """Return True for context overflow or timeout errors.
+
+        Handles two failure patterns during long plan execution:
+        1. **Context overflow** — backend rejects the request because
+           the prompt exceeds its buffer.
+        2. **ReadTimeout** — streaming stalls (network or overload).
+        Both are resolved by truncating accumulated tool-result outputs.
+        """
         error_str = str(exc).lower()
         keywords = [
+            # Context overflow variants
             "buffer overflow",
             "context length",
             "context_length",
@@ -934,6 +955,10 @@ class CoPawAgent(ToolGuardMixin, ReActAgent):
             "too many tokens",
             "request too large",
             "payload too large",
+            # Timeout / connectivity variants
+            "readtimeout",
+            "connecttimeout",
+            "timeout",
         ]
         return any(kw in error_str for kw in keywords)
 
