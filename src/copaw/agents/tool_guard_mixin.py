@@ -88,8 +88,7 @@ class ToolGuardMixin:
             nb is not None
             and nb.current_plan is not None
             and any(
-                st.state == "in_progress"
-                for st in nb.current_plan.subtasks
+                st.state == "in_progress" for st in nb.current_plan.subtasks
             )
         ):
             logger.info(

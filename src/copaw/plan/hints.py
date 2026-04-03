@@ -51,6 +51,18 @@ _PLAN_DESC_LIMIT = 200
 _STALL_THRESHOLD = 6
 
 
+def set_plan_gate(plan_notebook, enabled: bool = True) -> None:
+    """Activate or deactivate the plan tool gate on *plan_notebook*.
+
+    The gate ensures that only ``create_plan`` is allowed until an
+    active plan exists.  Called by the runner when a ``/plan <desc>``
+    command is detected.
+    """
+    if plan_notebook is not None:
+        # pylint: disable-next=protected-access
+        plan_notebook._copaw_plan_gate = enabled
+
+
 def check_plan_tool_gate(plan_notebook, tool_name: str):
     """Return an error string if *tool_name* must be blocked, else
     ``None``.
@@ -60,9 +72,9 @@ def check_plan_tool_gate(plan_notebook, tool_name: str):
     ``create_plan`` may run.  All other tools are rejected with a
     message instructing the model to call ``create_plan`` first.
 
-    The gate flag ``_copaw_plan_gate`` is set by the runner when a
-    ``/plan <description>`` command is detected and is automatically
-    bypassed once a plan exists (``current_plan is not None``).
+    The gate flag is set via :func:`set_plan_gate` and is
+    automatically bypassed once a plan exists
+    (``current_plan is not None``).
     """
     if plan_notebook is None:
         return None
@@ -316,7 +328,8 @@ if _HAS_DEFAULT_HINT:
             )
 
         def __call__(
-            self, plan: "Plan | None",
+            self,
+            plan: "Plan | None",
         ) -> str | None:
             """Generate a compact hint.
 
@@ -329,23 +342,21 @@ if _HAS_DEFAULT_HINT:
                 self._ip_call_count = 0
                 hint = self.no_plan
             else:
-                _, n_ip, n_done, n_abn, ip_idx = (
-                    _count_states(plan)
-                )
+                _, n_ip, n_done, n_abn, ip_idx = _count_states(plan)
                 if n_ip == 0:
                     self._last_ip_name = None
                     self._ip_call_count = 0
 
                 hint = self._pick_hint(
-                    plan, n_ip, n_done, n_abn, ip_idx,
+                    plan,
+                    n_ip,
+                    n_done,
+                    n_abn,
+                    ip_idx,
                 )
 
             if hint:
-                return (
-                    f"{self.hint_prefix}"
-                    f"{hint}"
-                    f"{self.hint_suffix}"
-                )
+                return f"{self.hint_prefix}" f"{hint}" f"{self.hint_suffix}"
             return hint
 
         def _pick_hint(self, plan, n_ip, n_done, n_abn, ip_idx):
@@ -361,11 +372,9 @@ if _HAS_DEFAULT_HINT:
                     plan=_compact_plan_text(plan),
                 )
             if n_ip == 0 and n_done > 0:
-                return (
-                    self.when_no_subtask_in_progress.format(
-                        plan=_compact_plan_text(plan),
-                        index=n_done,
-                    )
+                return self.when_no_subtask_in_progress.format(
+                    plan=_compact_plan_text(plan),
+                    index=n_done,
                 )
             return None
 

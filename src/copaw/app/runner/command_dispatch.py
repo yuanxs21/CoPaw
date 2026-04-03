@@ -210,9 +210,13 @@ def _set_message_text_content(last: Any, new_text: str) -> Any:
                     replaced = True
                 else:
                     new_blocks.append(copy.deepcopy(block))
-            d["content"] = new_blocks if replaced else [
-                {"type": "text", "text": new_text},
-            ]
+            d["content"] = (
+                new_blocks
+                if replaced
+                else [
+                    {"type": "text", "text": new_text},
+                ]
+            )
         elif isinstance(content, str):
             d["content"] = new_text
         else:

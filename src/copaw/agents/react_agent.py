@@ -779,9 +779,7 @@ class CoPawAgent(ToolGuardMixin, ReActAgent):
 
                 # --- Context overflow / ReadTimeout recovery ---
                 if self._is_context_overflow_error(e):
-                    n_trunc = (
-                        self._emergency_truncate_tool_results()
-                    )
+                    n_trunc = self._emergency_truncate_tool_results()
                     if n_trunc > 0:
                         logger.warning(
                             "_summarizing: context overflow "
@@ -807,9 +805,7 @@ class CoPawAgent(ToolGuardMixin, ReActAgent):
                     ):
                         raise
 
-                    n_stripped = (
-                        self._strip_media_blocks_from_memory()
-                    )
+                    n_stripped = self._strip_media_blocks_from_memory()
                     if n_stripped == 0:
                         raise
 
@@ -1022,7 +1018,9 @@ class CoPawAgent(ToolGuardMixin, ReActAgent):
                 count += 1
             elif isinstance(out, list):
                 count += self._truncate_text_items(
-                    out, limit, note,
+                    out,
+                    limit,
+                    note,
                 )
         return count
 
@@ -1191,8 +1189,12 @@ class CoPawAgent(ToolGuardMixin, ReActAgent):
             await self.print(plan_reply)
             return plan_reply
 
-        was_list = isinstance(msg, list)
-        work_msgs: list[Msg] = list(msg) if was_list else [msg]
+        if isinstance(msg, list):
+            was_list = True
+            work_msgs: list[Msg] = list(msg)
+        else:
+            was_list = False
+            work_msgs = [msg] if isinstance(msg, Msg) else []
         if query and is_plan_with_inline_description(query):
             if not self._agent_config.plan.enabled:
                 need_plan = Msg(

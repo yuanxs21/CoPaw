@@ -46,8 +46,7 @@ class RevisePlanRequest(BaseModel):
     def _check_subtask_required(self) -> "RevisePlanRequest":
         if self.action in ("add", "revise") and self.subtask is None:
             raise ValueError(
-                f"'subtask' is required when action is "
-                f"'{self.action}'",
+                f"'subtask' is required when action is " f"'{self.action}'",
             )
         return self
 

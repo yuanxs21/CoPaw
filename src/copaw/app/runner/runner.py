@@ -31,6 +31,7 @@ from ..channels.schema import DEFAULT_CHANNEL
 from ...agents.react_agent import CoPawAgent
 from ...security.tool_guard.models import TOOL_GUARD_DENIED_MARK
 from ...config.config import load_agent_config
+from ...plan import set_plan_gate
 from ...constant import (
     TOOL_GUARD_APPROVAL_TIMEOUT_SECONDS,
     WORKING_DIR,
@@ -251,8 +252,7 @@ class AgentRunner(Runner):
                 return
             msgs = rewrite_msgs_strip_plan_prefix(msgs)
             query = _get_last_user_text(msgs)
-            if self._plan_notebook is not None:
-                self._plan_notebook._copaw_plan_gate = True
+            set_plan_gate(self._plan_notebook)
 
         (
             approval_response,
@@ -451,9 +451,7 @@ class AgentRunner(Runner):
             if agent is not None and session_state_loaded:
                 save_kwargs = {"agent": agent}
                 if self._plan_notebook is not None:
-                    save_kwargs["plan_notebook"] = (
-                        self._plan_notebook
-                    )
+                    save_kwargs["plan_notebook"] = self._plan_notebook
                 await self.session.save_session_state(
                     session_id=session_id,
                     user_id=user_id,
