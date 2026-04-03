@@ -90,10 +90,10 @@ User requested help building a user authentication system, login endpoint implem
 
 Structured multi-step work uses **plan mode**. The agent is **not** prompted to create a plan on every message; you start planning explicitly.
 
-| Form | Behavior |
-| ---- | -------- |
-| `/plan` | Turns on plan mode if needed, then shows whether a plan exists and lists subtasks (or hints to use `/plan <description>`). |
-| `/plan <description>` | Treated as a normal chat message (prefix stripped): the agent receives an explicit request to create a plan for the task. |
+| Form                  | Behavior                                                                                                                   |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `/plan`               | Turns on plan mode if needed, then shows whether a plan exists and lists subtasks (or hints to use `/plan <description>`). |
+| `/plan <description>` | Treated as a normal chat message (prefix stripped): the agent receives an explicit request to create a plan for the task.  |
 
 **Example:**
 
