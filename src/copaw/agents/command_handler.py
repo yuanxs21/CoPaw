@@ -59,7 +59,9 @@ class ConversationCommandHandlerMixin:
         """
         if not isinstance(query, str) or not query.startswith("/"):
             return False
-        return query.strip().lstrip("/") in self.SYSTEM_COMMANDS
+        stripped = query.strip().lstrip("/")
+        cmd = stripped.split(" ", 1)[0] if stripped else ""
+        return cmd in self.SYSTEM_COMMANDS
 
 
 class CommandHandler(ConversationCommandHandlerMixin):
@@ -119,9 +121,10 @@ class CommandHandler(ConversationCommandHandlerMixin):
     async def _process_compact(
         self,
         messages: list[Msg],
-        _args: str = "",
+        args: str = "",
     ) -> Msg:
         """Process /compact command."""
+        extra_instruction = args.strip()
         if not messages:
             return await self._make_system_msg(
                 "**No messages to compact.**\n\n"
@@ -139,6 +142,7 @@ class CommandHandler(ConversationCommandHandlerMixin):
         compact_content = await self.memory_manager.compact_memory(
             messages=messages,
             previous_summary=self.memory.get_compressed_summary(),
+            extra_instruction=extra_instruction,
         )
 
         if not compact_content:

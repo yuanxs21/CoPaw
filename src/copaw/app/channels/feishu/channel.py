@@ -31,7 +31,6 @@ from agentscope_runtime.engine.schemas.agent_schemas import (
     AudioContent,
     FileContent,
     ImageContent,
-    RunStatus,
     TextContent,
 )
 
@@ -1689,14 +1688,17 @@ class FeishuChannel(BaseChannel):
                 )
                 if msg_id:
                     last_message_id = msg_id
+        if last_message_id and meta is not None:
+            meta["_last_sent_message_id"] = last_message_id
         return last_message_id
 
-    async def _run_process_loop(
+    async def _on_process_completed(
         self,
         request: Any,
         to_handle: str,
         send_meta: Dict[str, Any],
     ) -> None:
+<<<<<<< HEAD
         """Override to track the last sent message_id across all events
         and add a DONE reaction after the full reply is complete.
         """
@@ -1748,6 +1750,12 @@ class FeishuChannel(BaseChannel):
                 to_handle,
                 "An error occurred while processing your request.",
             )
+=======
+        """Add DONE reaction to the last sent message."""
+        last_msg_id = send_meta.get("_last_sent_message_id")
+        if last_msg_id:
+            await self._add_reaction(last_msg_id, "DONE")
+>>>>>>> origin/main
 
     async def send(
         self,

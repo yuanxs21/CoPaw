@@ -210,7 +210,11 @@ async def get_chat(
         return ChatHistory(messages=[], status=status)
     memory_state = state.get("agent", {}).get("memory", {})
     memory = InMemoryMemory()
+<<<<<<< HEAD
     memory.load_state_dict(memory_state)
+=======
+    memory.load_state_dict(memory_state, strict=False)
+>>>>>>> origin/main
 
     all_memories = await memory.get_memory(prepend_summary=False)
 

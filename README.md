@@ -86,7 +86,7 @@ Your personal AI assistant — easy to install, deploy locally or in the cloud, 
 >
 > - **🚀 I'm new and want to try quickly**: [Quick Start](#quick-start) → three commands to run → [Configure model](#api-key) → chat in Console
 > - **💬 I want to use in DingTalk/Feishu/WeChat**: Complete Quick Start → [Configure model](#api-key) → [Channel setup](https://copaw.agentscope.io/docs/channels)
-> - **🐍 I don't want to install Python**: [Desktop app](#desktop-application-beta) or [Script install](#script-install) or [ModelScope Studio](https://modelscope.cn/studios/fork?target=AgentScope/CoPaw)
+> - **🐍 I don't want to install Python**: [Desktop app](#option-6-desktop-application-beta) or [Script install](#option-2-script-install) or [ModelScope Studio](https://modelscope.cn/studios/fork?target=AgentScope/CoPaw)
 > - **💻 I want to use local models (no API key needed)**: [Local Models](#local-models) → download model → start using
 > - **🛠️ I want to contribute code or develop new features**: [Install from source](#install-from-source) → [Contributing](#contributing)
 - [News](#news)
@@ -392,6 +392,7 @@ CoPaw includes multi-layer security mechanisms to protect your data and system:
 - **File access guard** — Restricts agent access to sensitive paths (e.g., `~/.ssh`, key files, system directories, etc.)
 - **Skill security scanning** — Automatically scans before installing skills, detecting risks like prompt injection, command injection, hardcoded keys, data exfiltration, etc.
 - **Local deployment** — All data and memory stored locally, no third-party upload (when using cloud LLM APIs, conversation content is sent to the corresponding API provider)
+- **Web Authentication** — Optional login protection for the Console. Disabled by default; set `COPAW_AUTH_ENABLED=true` to enable. See [Web Authentication](https://copaw.agentscope.io/docs/security#Web-Authentication) for details.
 
 See [Security documentation](https://copaw.agentscope.io/docs/security) for details.
 
