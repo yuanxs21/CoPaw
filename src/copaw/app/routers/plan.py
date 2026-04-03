@@ -5,12 +5,16 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import secrets
+import time
+from dataclasses import dataclass
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request
 from starlette.responses import StreamingResponse
 
 from ..agent_context import get_agent_for_request
+from ..auth import has_registered_users, is_auth_enabled
 from ...plan.schemas import (
     FinishPlanRequest,
     PlanConfigUpdateRequest,
@@ -23,6 +27,56 @@ from ...plan.broadcast import register_sse_client, unregister_sse_client
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/plan", tags=["plan"])
+
+# Short-lived, single-use tickets for plan SSE (EventSource cannot send
+# Authorization headers; avoids putting long-lived JWTs in query strings).
+_SSE_TICKET_TTL_SECONDS = 60
+
+
+@dataclass
+class _SseTicket:
+    agent_id: str
+    created_at: float
+    used: bool = False
+
+
+_sse_tickets: dict[str, _SseTicket] = {}
+
+
+def _purge_expired_sse_tickets() -> None:
+    now = time.time()
+    expired = [
+        k
+        for k, v in _sse_tickets.items()
+        if v.used or (now - v.created_at) > _SSE_TICKET_TTL_SECONDS
+    ]
+    for k in expired:
+        _sse_tickets.pop(k, None)
+
+
+def _issue_sse_ticket(agent_id: str) -> str:
+    _purge_expired_sse_tickets()
+    raw = secrets.token_urlsafe(32)
+    _sse_tickets[raw] = _SseTicket(
+        agent_id=agent_id,
+        created_at=time.time(),
+    )
+    return raw
+
+
+def _consume_sse_ticket(raw: str) -> Optional[str]:
+    """Return *agent_id* if *raw* is valid, else ``None``."""
+    _purge_expired_sse_tickets()
+    rec = _sse_tickets.get(raw)
+    if rec is None:
+        return None
+    if rec.used:
+        return None
+    if (time.time() - rec.created_at) > _SSE_TICKET_TTL_SECONDS:
+        _sse_tickets.pop(raw, None)
+        return None
+    rec.used = True
+    return rec.agent_id
 
 
 async def _get_plan_notebook(request: Request):
@@ -98,13 +152,48 @@ async def finish_plan(body: FinishPlanRequest, request: Request):
     return {"success": True}
 
 
+@router.post(
+    "/stream/ticket",
+    summary="Issue a short-lived SSE ticket for plan stream",
+)
+async def issue_plan_stream_ticket(request: Request):
+    """Return a single-use ticket for ``GET /plan/stream``.
+
+    Call this with a normal ``Authorization: Bearer`` header; the ticket
+    is bound to the resolved agent and must be used once within
+    ``_SSE_TICKET_TTL_SECONDS``.
+    """
+    workspace = await get_agent_for_request(request)
+    ticket = _issue_sse_ticket(workspace.agent_id)
+    return {"ticket": ticket}
+
+
 @router.get(
     "/stream",
     summary="SSE stream for real-time plan updates",
 )
 async def stream_plan_updates(request: Request):
     """Open an SSE connection that emits plan_update events."""
-    workspace = await get_agent_for_request(request)
+    auth_required = is_auth_enabled() and has_registered_users()
+    ticket_raw = request.query_params.get("ticket")
+    if auth_required:
+        if not ticket_raw:
+            raise HTTPException(
+                status_code=401,
+                detail="Missing SSE ticket; POST /plan/stream/ticket first",
+            )
+        bound_agent_id = _consume_sse_ticket(ticket_raw)
+        if bound_agent_id is None:
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid or expired SSE ticket",
+            )
+        workspace = await get_agent_for_request(
+            request,
+            agent_id=bound_agent_id,
+        )
+    else:
+        workspace = await get_agent_for_request(request)
     agent_id = workspace.agent_id
 
     q = register_sse_client(agent_id)

@@ -92,8 +92,23 @@ const PlanPanel: React.FC<PlanPanelProps> = ({
 
   useEffect(() => {
     if (!open || !planEnabled) return;
-    const unsub = subscribePlanUpdates((updated) => setPlan(updated));
-    return unsub;
+    let unsub: (() => void) | undefined;
+    let cancelled = false;
+    subscribePlanUpdates((updated) => setPlan(updated))
+      .then((close) => {
+        if (cancelled) {
+          close();
+        } else {
+          unsub = close;
+        }
+      })
+      .catch((err) => {
+        console.warn("Plan SSE subscribe failed:", err);
+      });
+    return () => {
+      cancelled = true;
+      unsub?.();
+    };
   }, [open, planEnabled]);
 
   const doneCount = useMemo(
@@ -131,11 +146,10 @@ const PlanPanel: React.FC<PlanPanelProps> = ({
   const handleEnablePlan = useCallback(async () => {
     setEnabling(true);
     try {
+      const current = await api.getPlanConfig();
       await api.updatePlanConfig({
+        ...current,
         enabled: true,
-        max_subtasks: null,
-        storage_type: "memory",
-        storage_path: null,
       });
       setPlanEnabled(true);
       message.success(

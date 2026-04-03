@@ -1,5 +1,5 @@
 import { request } from "../request";
-import { getApiUrl } from "../config";
+import { getApiToken, getApiUrl } from "../config";
 import { buildAuthHeaders } from "../authHeaders";
 import type {
   Plan,
@@ -40,20 +40,25 @@ export const planApi = {
 
 /**
  * Subscribe to real-time plan updates via SSE.
- * Returns an unsubscribe function that closes the EventSource.
+ * When an API token is present, obtains a short-lived single-use ticket
+ * via POST (Bearer header) so the long-lived token is not put in the URL.
+ * Returns a Promise of an unsubscribe function that closes the EventSource.
  */
-export function subscribePlanUpdates(
+export async function subscribePlanUpdates(
   onUpdate: (plan: Plan | null) => void,
-): () => void {
+): Promise<() => void> {
   const url = getApiUrl("/plan/stream");
   const headers = buildAuthHeaders();
-
-  // EventSource does not support custom headers natively.
-  // Append token as query param if auth is needed.
-  const token = headers["Authorization"]?.replace("Bearer ", "");
   const agentId = headers["X-Agent-Id"];
+
   const params = new URLSearchParams();
-  if (token) params.set("token", token);
+  if (getApiToken()) {
+    const { ticket } = await request<{ ticket: string }>(
+      "/plan/stream/ticket",
+      { method: "POST" },
+    );
+    params.set("ticket", ticket);
+  }
   if (agentId) params.set("agent_id", agentId);
   const sep = url.includes("?") ? "&" : "?";
   const fullUrl = params.toString() ? `${url}${sep}${params.toString()}` : url;
