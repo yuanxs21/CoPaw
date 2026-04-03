@@ -3,21 +3,13 @@ import { getApiUrl } from "../config";
 import { buildAuthHeaders } from "../authHeaders";
 import type {
   Plan,
-  PlanSummary,
   PlanConfig,
-  CreatePlanRequest,
   RevisePlanRequest,
   FinishPlanRequest,
 } from "../types";
 
 export const planApi = {
   getCurrentPlan: () => request<Plan | null>("/plan/current"),
-
-  createPlan: (body: CreatePlanRequest) =>
-    request<Plan>("/plan/create", {
-      method: "POST",
-      body: JSON.stringify(body),
-    }),
 
   revisePlan: (body: RevisePlanRequest) =>
     request<Plan>("/plan/revise", {
@@ -29,18 +21,6 @@ export const planApi = {
     request<{ success: boolean }>("/plan/finish", {
       method: "POST",
       body: JSON.stringify(body),
-    }),
-
-  getPlanHistory: () => request<PlanSummary[]>("/plan/history"),
-
-  recoverPlan: (planId: string) =>
-    request<Plan>(`/plan/recover/${planId}`, {
-      method: "POST",
-    }),
-
-  deletePlan: (planId: string) =>
-    request<{ success: boolean }>(`/plan/history/${planId}`, {
-      method: "DELETE",
     }),
 
   getPlanConfig: () => request<PlanConfig>("/plan/config"),

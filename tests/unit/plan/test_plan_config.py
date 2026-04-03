@@ -19,10 +19,6 @@ class TestPlanConfigDefaults:
         assert cfg.storage_type == "memory"
         assert cfg.storage_path is None
 
-    def test_default_agent_managed(self):
-        cfg = PlanConfig()
-        assert cfg.agent_managed is True
-
     def test_default_max_subtasks_none(self):
         cfg = PlanConfig()
         assert cfg.max_subtasks is None
@@ -37,13 +33,11 @@ class TestPlanConfigValidation:
             max_subtasks=5,
             storage_type="file",
             storage_path="/tmp/plans",
-            agent_managed=False,
         )
         assert cfg.enabled is True
         assert cfg.max_subtasks == 5
         assert cfg.storage_type == "file"
         assert cfg.storage_path == "/tmp/plans"
-        assert cfg.agent_managed is False
 
     def test_extra_fields_ignored(self):
         cfg = PlanConfig.model_validate(

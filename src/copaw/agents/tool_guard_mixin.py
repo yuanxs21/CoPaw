@@ -335,6 +335,21 @@ class ToolGuardMixin:
         engine = self._tool_guard_engine
         tool_name = str(tool_call.get("name", ""))
         tool_input = tool_call.get("input", {})
+
+        from copaw.plan.hints import check_plan_tool_gate
+
+        gate_msg = check_plan_tool_gate(
+            getattr(self, "plan_notebook", None),
+            tool_name,
+        )
+        if gate_msg is not None:
+            return _GuardAction(
+                "plan_gated",
+                tool_name,
+                tool_input,
+                guard_result=gate_msg,
+            )
+
         if not tool_name or not engine.enabled:
             return None
 
@@ -384,6 +399,11 @@ class ToolGuardMixin:
         tool_call: dict[str, Any],
     ) -> dict | None:
         """Execute the guard action decided under lock (runs outside lock)."""
+        if action.kind == "plan_gated":
+            return await self._acting_plan_gated(
+                tool_call,
+                action.guard_result,
+            )
         if action.kind == "auto_denied":
             return await self._acting_auto_denied(
                 tool_call,
@@ -452,6 +472,33 @@ class ToolGuardMixin:
     # ------------------------------------------------------------------
     # Denied / Approval responses
     # ------------------------------------------------------------------
+
+    async def _acting_plan_gated(
+        self,
+        tool_call: dict[str, Any],
+        gate_msg: str,
+    ) -> dict | None:
+        """Return a tool_result telling the model to call create_plan."""
+        from agentscope.message import ToolResultBlock
+
+        tool_name = str(tool_call.get("name", ""))
+        tool_res_msg = Msg(
+            "system",
+            [
+                ToolResultBlock(
+                    type="tool_result",
+                    id=tool_call["id"],
+                    name=tool_name,
+                    output=[
+                        {"type": "text", "text": gate_msg},
+                    ],
+                ),
+            ],
+            "system",
+        )
+        await self.print(tool_res_msg, True)
+        await self.memory.add(tool_res_msg)
+        return None
 
     async def _acting_auto_denied(
         self,

@@ -19,7 +19,6 @@ import {
   CloseCircleOutlined,
   DeleteOutlined,
   EditOutlined,
-  HistoryOutlined,
   MinusCircleOutlined,
   PlusOutlined,
 } from "@ant-design/icons";
@@ -28,7 +27,7 @@ import { SparkOperateRightLine } from "@agentscope-ai/icons";
 import { useTranslation } from "react-i18next";
 import api from "../../api";
 import { subscribePlanUpdates } from "../../api/modules/plan";
-import type { Plan, PlanSummary, SubTask } from "../../api/types";
+import type { Plan, SubTask } from "../../api/types";
 import styles from "./index.module.less";
 
 const { Text, Title, Paragraph } = Typography;
@@ -67,8 +66,6 @@ const PlanPanel: React.FC<PlanPanelProps> = ({
   const [plan, setPlan] = useState<Plan | null>(null);
   const [planEnabled, setPlanEnabled] = useState<boolean | null>(null);
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
-  const [historyOpen, setHistoryOpen] = useState(false);
-  const [history, setHistory] = useState<PlanSummary[]>([]);
   const [enabling, setEnabling] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [stopping, setStopping] = useState(false);
@@ -115,32 +112,6 @@ const PlanPanel: React.FC<PlanPanelProps> = ({
 
   // --- handlers ---
 
-  const handleShowHistory = useCallback(async () => {
-    try {
-      const data = await api.getPlanHistory();
-      setHistory(data);
-      setHistoryOpen(true);
-    } catch {
-      // ignore
-    }
-  }, []);
-
-  const handleRecover = useCallback(
-    async (planId: string) => {
-      try {
-        const recovered = await api.recoverPlan(planId);
-        setPlan(recovered);
-        setHistoryOpen(false);
-        message.success(
-          t("plan.restoreSuccess", "Plan restored successfully"),
-        );
-      } catch {
-        message.error(t("plan.restoreError", "Failed to restore plan"));
-      }
-    },
-    [t],
-  );
-
   const handleStopPlan = useCallback(async () => {
     setStopping(true);
     try {
@@ -149,34 +120,13 @@ const PlanPanel: React.FC<PlanPanelProps> = ({
         outcome: "Manually stopped by user",
       });
       setPlan(null);
-      message.success(
-        t("plan.stoppedSuccess", "Plan has been stopped"),
-      );
+      message.success(t("plan.stoppedSuccess", "Plan has been stopped"));
     } catch {
-      message.error(
-        t("plan.stoppedError", "Failed to stop plan"),
-      );
+      message.error(t("plan.stoppedError", "Failed to stop plan"));
     } finally {
       setStopping(false);
     }
   }, [t]);
-
-  const handleDeleteHistoryPlan = useCallback(
-    async (planId: string) => {
-      try {
-        await api.deletePlan(planId);
-        setHistory((prev) => prev.filter((h) => h.plan_id !== planId));
-        message.success(
-          t("plan.deleteHistorySuccess", "Historical plan deleted"),
-        );
-      } catch {
-        message.error(
-          t("plan.deleteHistoryError", "Failed to delete plan"),
-        );
-      }
-    },
-    [t],
-  );
 
   const handleEnablePlan = useCallback(async () => {
     setEnabling(true);
@@ -186,7 +136,6 @@ const PlanPanel: React.FC<PlanPanelProps> = ({
         max_subtasks: null,
         storage_type: "memory",
         storage_path: null,
-        agent_managed: true,
       });
       setPlanEnabled(true);
       message.success(
@@ -233,9 +182,7 @@ const PlanPanel: React.FC<PlanPanelProps> = ({
         outcome: "Cancelled by user",
       });
       setPlan(null);
-      message.success(
-        t("plan.cancelledSuccess", "Plan cancelled"),
-      );
+      message.success(t("plan.cancelledSuccess", "Plan cancelled"));
     } catch {
       message.error(t("plan.cancelledError", "Failed to cancel plan"));
     }
@@ -417,15 +364,6 @@ const PlanPanel: React.FC<PlanPanelProps> = ({
             </span>
           </div>
           <Flex gap={8} align="center">
-            {planEnabled && (
-              <Tooltip title={t("plan.history", "History")}>
-                <IconButton
-                  bordered={false}
-                  icon={<HistoryOutlined />}
-                  onClick={handleShowHistory}
-                />
-              </Tooltip>
-            )}
             <IconButton
               bordered={false}
               icon={<SparkOperateRightLine />}
@@ -559,62 +497,6 @@ const PlanPanel: React.FC<PlanPanelProps> = ({
           )}
         </div>
       </Drawer>
-
-      {/* History Modal */}
-      <Modal
-        open={historyOpen}
-        onCancel={() => setHistoryOpen(false)}
-        title={t("plan.historyTitle", "Plan History")}
-        footer={null}
-        width={500}
-      >
-        {history.length === 0 ? (
-          <Text type="secondary">
-            {t("plan.noHistory", "No historical plans")}
-          </Text>
-        ) : (
-          history.map((h) => (
-            <Flex
-              key={h.plan_id}
-              justify="space-between"
-              align="center"
-              style={{ padding: "8px 0", borderBottom: "1px solid #f0f0f0" }}
-            >
-              <div>
-                <Text strong>{h.name}</Text>
-                <br />
-                <Text type="secondary" style={{ fontSize: 12 }}>
-                  {h.state} &middot; {h.completed_count}/{h.subtask_count}{" "}
-                  &middot; {h.created_at}
-                </Text>
-              </div>
-              <Flex gap={8} align="center">
-                <AntButton size="small" onClick={() => handleRecover(h.plan_id)}>
-                  {t("plan.restore", "Restore")}
-                </AntButton>
-                <Popconfirm
-                  title={t(
-                    "plan.deleteHistoryConfirm",
-                    "Delete this historical plan?",
-                  )}
-                  okText={t("common.delete", "Delete")}
-                  cancelText={t("common.cancel", "Cancel")}
-                  okButtonProps={{ danger: true }}
-                  onConfirm={() => handleDeleteHistoryPlan(h.plan_id)}
-                >
-                  <Tooltip title={t("common.delete", "Delete")}>
-                    <AntButton
-                      size="small"
-                      danger
-                      icon={<DeleteOutlined />}
-                    />
-                  </Tooltip>
-                </Popconfirm>
-              </Flex>
-            </Flex>
-          ))
-        )}
-      </Modal>
 
       {/* Edit Subtask Modal */}
       <Modal

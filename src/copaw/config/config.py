@@ -638,15 +638,6 @@ class PlanConfig(BaseModel):
         default=None,
         description="Path for file-based storage (auto-derived if None)",
     )
-    agent_managed: bool = Field(
-        default=True,
-        description=(
-            "Profile flag for agent-driven planning; CoPaw does not inject "
-            "a default 'create a plan' hint on every turn. Users start "
-            "plans with `/plan`, the console Plan panel, or after a plan "
-            "already exists (see plan_to_hint)."
-        ),
-    )
 
 
 class AgentProfileConfig(BaseModel):

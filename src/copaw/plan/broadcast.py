@@ -15,10 +15,17 @@ logger = logging.getLogger(__name__)
 
 _plan_update_queues: dict[str, set[asyncio.Queue[Any]]] = {}
 
+# Bound per-client queues so a slow / stuck consumer cannot grow
+# memory indefinitely.  256 plan-update events is generous for any
+# realistic console session; older events are dropped with a warning.
+_SSE_QUEUE_MAXSIZE = 256
+
 
 def register_sse_client(agent_id: str) -> asyncio.Queue[Any]:
     """Register a new SSE client queue for *agent_id*."""
-    q: asyncio.Queue[Any] = asyncio.Queue()
+    q: asyncio.Queue[Any] = asyncio.Queue(
+        maxsize=_SSE_QUEUE_MAXSIZE,
+    )
     _plan_update_queues.setdefault(agent_id, set()).add(q)
     return q
 

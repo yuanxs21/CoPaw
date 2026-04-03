@@ -33,7 +33,6 @@ def _make_app(plan_notebook=None):
         "max_subtasks": None,
         "storage_type": "memory",
         "storage_path": None,
-        "agent_managed": True,
     }
     mock_workspace.config = mock_config
 
@@ -76,7 +75,7 @@ class TestPlanCurrentEndpoint:
 class TestPlanDisabledEndpoints:
     """Endpoints return 404 when plan mode is disabled."""
 
-    def test_create_returns_404(self):
+    def test_revise_returns_404(self):
         app, mock_get = _make_app(plan_notebook=None)
         with patch(
             "copaw.app.routers.plan.get_agent_for_request",
@@ -84,24 +83,12 @@ class TestPlanDisabledEndpoints:
         ):
             client = TestClient(app)
             r = client.post(
-                "/api/plan/create",
+                "/api/plan/revise",
                 json={
-                    "name": "X",
-                    "description": "X",
-                    "expected_outcome": "X",
-                    "subtasks": [],
+                    "subtask_idx": 0,
+                    "action": "delete",
                 },
             )
-            assert r.status_code == 404
-
-    def test_history_returns_404(self):
-        app, mock_get = _make_app(plan_notebook=None)
-        with patch(
-            "copaw.app.routers.plan.get_agent_for_request",
-            side_effect=mock_get,
-        ):
-            client = TestClient(app)
-            r = client.get("/api/plan/history")
             assert r.status_code == 404
 
 

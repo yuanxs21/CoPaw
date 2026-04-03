@@ -246,6 +246,8 @@ class AgentRunner(Runner):
                 return
             msgs = rewrite_msgs_strip_plan_prefix(msgs)
             query = _get_last_user_text(msgs)
+            if self._plan_notebook is not None:
+                self._plan_notebook._copaw_plan_gate = True
 
         (
             approval_response,

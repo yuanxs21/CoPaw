@@ -12,14 +12,12 @@ from starlette.responses import StreamingResponse
 
 from ..agent_context import get_agent_for_request
 from ...plan.schemas import (
-    CreatePlanRequest,
     FinishPlanRequest,
     PlanConfigUpdateRequest,
     PlanStateResponse,
-    PlanSummary,
     RevisePlanRequest,
 )
-from ...plan.schemas import plan_to_response, plan_to_summary
+from ...plan.schemas import plan_to_response
 from ...plan.broadcast import register_sse_client, unregister_sse_client
 
 logger = logging.getLogger(__name__)
@@ -50,34 +48,6 @@ async def get_current_plan(request: Request):
     nb = workspace.plan_notebook
     if nb is None or nb.current_plan is None:
         return None
-    return plan_to_response(nb.current_plan)
-
-
-@router.post(
-    "/create",
-    response_model=PlanStateResponse,
-    summary="Manually create a plan",
-)
-async def create_plan(body: CreatePlanRequest, request: Request):
-    """Create a new plan with the given subtasks."""
-    nb, _ = await _get_plan_notebook(request)
-
-    from agentscope.plan import SubTask
-
-    subtasks = [
-        SubTask(
-            name=st.name,
-            description=st.description,
-            expected_outcome=st.expected_outcome,
-        )
-        for st in body.subtasks
-    ]
-    await nb.create_plan(
-        name=body.name,
-        description=body.description,
-        expected_outcome=body.expected_outcome,
-        subtasks=subtasks,
-    )
     return plan_to_response(nb.current_plan)
 
 
@@ -125,59 +95,6 @@ async def finish_plan(body: FinishPlanRequest, request: Request):
             detail="No active plan to finish",
         )
     await nb.finish_plan(state=body.state, outcome=body.outcome)
-    return {"success": True}
-
-
-@router.get(
-    "/history",
-    response_model=list[PlanSummary],
-    summary="List historical plans",
-)
-async def get_plan_history(request: Request):
-    """List all historical plans from storage."""
-    nb, _ = await _get_plan_notebook(request)
-    plans = await nb.storage.get_plans()
-    return [plan_to_summary(p) for p in plans]
-
-
-@router.post(
-    "/recover/{plan_id}",
-    response_model=PlanStateResponse,
-    summary="Recover a historical plan",
-)
-async def recover_plan(plan_id: str, request: Request):
-    """Recover a historical plan by ID."""
-    nb, _ = await _get_plan_notebook(request)
-    await nb.recover_historical_plan(plan_id=plan_id)
-    # recover_historical_plan leaves current_plan unchanged when *plan_id*
-    # is missing; do not mutate an unrelated active plan in that case.
-    if nb.current_plan is None or nb.current_plan.id != plan_id:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Plan '{plan_id}' not found in storage",
-        )
-    # Historical plans are stored as done/abandoned; reset so the UI treats
-    # the restored plan as active and subtasks can be re-run from todo.
-    plan = nb.current_plan
-    plan.state = "todo"
-    plan.outcome = None
-    plan.finished_at = None
-    for st in plan.subtasks:
-        st.state = "todo"
-        st.outcome = None
-        st.finished_at = None
-    await nb._trigger_plan_change_hooks()
-    return plan_to_response(nb.current_plan)
-
-
-@router.delete(
-    "/history/{plan_id}",
-    summary="Delete a historical plan",
-)
-async def delete_historical_plan(plan_id: str, request: Request):
-    """Remove a plan from storage by ID (does not affect current_plan)."""
-    nb, _ = await _get_plan_notebook(request)
-    await nb.storage.delete_plan(plan_id)
     return {"success": True}
 
 

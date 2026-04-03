@@ -1,10 +1,12 @@
 # -*- coding: utf-8 -*-
 """Chat management API."""
 from __future__ import annotations
+import logging
 from typing import Optional
 from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from agentscope.memory import InMemoryMemory
+from agentscope.message import Msg
 
 from .session import SafeJSONSession
 from .manager import ChatManager
@@ -13,6 +15,8 @@ from .models import (
     ChatHistory,
 )
 from .utils import agentscope_msg_to_message
+
+logger = logging.getLogger(__name__)
 
 
 router = APIRouter(prefix="/chats", tags=["chats"])
@@ -130,6 +134,45 @@ async def batch_delete_chats(
     return {"deleted": deleted}
 
 
+def _build_history_prefix(
+    state: dict,
+    memory_state: dict,
+) -> list[Msg]:
+    """Reconstruct context messages lost to memory compaction.
+
+    When the memory-compaction hook runs, it removes older messages
+    and stores a textual summary in ``_compressed_summary``.  This
+    function re-creates that context so historical chats display a
+    complete narrative.
+    """
+    prefix: list[Msg] = []
+
+    compressed = memory_state.get("_compressed_summary", "")
+    if compressed:
+        prefix.append(
+            Msg("CoPaw", compressed, "assistant"),
+        )
+
+    plan_state = state.get("plan_notebook", {})
+    current_plan = plan_state.get("current_plan")
+    if current_plan and isinstance(current_plan, dict):
+        try:
+            from ...plan.schemas import plan_dict_to_overview
+
+            overview = plan_dict_to_overview(current_plan)
+            if overview:
+                prefix.append(
+                    Msg("CoPaw", overview, "assistant"),
+                )
+        except Exception:  # pylint: disable=broad-except
+            logger.debug(
+                "Skipping plan overview in history prefix",
+                exc_info=True,
+            )
+
+    return prefix
+
+
 @router.get("/{chat_id}", response_model=ChatHistory)
 async def get_chat(
     chat_id: str,
@@ -165,12 +208,16 @@ async def get_chat(
     status = await workspace.task_tracker.get_status(chat_id)
     if not state:
         return ChatHistory(messages=[], status=status)
-    memories = state.get("agent", {}).get("memory", {})
+    memory_state = state.get("agent", {}).get("memory", {})
     memory = InMemoryMemory()
-    memory.load_state_dict(memories)
+    memory.load_state_dict(memory_state)
 
-    memories = await memory.get_memory(prepend_summary=False)
-    messages = agentscope_msg_to_message(memories)
+    all_memories = await memory.get_memory(prepend_summary=False)
+
+    prefix_msgs = _build_history_prefix(state, memory_state)
+    messages = agentscope_msg_to_message(
+        prefix_msgs + all_memories,
+    )
     return ChatHistory(messages=messages, status=status)
 
 

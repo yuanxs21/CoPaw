@@ -23,7 +23,6 @@ export function PlanConfigCard() {
     max_subtasks: null,
     storage_type: "memory",
     storage_path: null,
-    agent_managed: true,
   });
 
   const fetchConfig = useCallback(async () => {
@@ -83,15 +82,6 @@ export function PlanConfigCard() {
     (e: { target: { value?: string } }) => {
       const value = (e.target.value ?? "memory") as "memory" | "file";
       const updated = { ...config, storage_type: value };
-      setConfig(updated);
-      save(updated);
-    },
-    [config, save],
-  );
-
-  const handleAgentManagedToggle = useCallback(
-    (checked: boolean) => {
-      const updated = { ...config, agent_managed: checked };
       setConfig(updated);
       save(updated);
     },
@@ -170,19 +160,6 @@ export function PlanConfigCard() {
               {t("agentConfig.planStorageFile", "Persistent (saved to disk)")}
             </Radio>
           </Radio.Group>
-        </Form.Item>
-
-        <Form.Item
-          label={t(
-            "agentConfig.planAgentManaged",
-            "Agent can create plans autonomously",
-          )}
-        >
-          <Switch
-            checked={config.agent_managed}
-            onChange={handleAgentManagedToggle}
-            disabled={!config.enabled || saving}
-          />
         </Form.Item>
       </Form>
     </Card>

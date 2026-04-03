@@ -20,26 +20,10 @@ export interface Plan {
   updated_at: string;
 }
 
-export interface PlanSummary {
-  plan_id: string;
-  name: string;
-  state: PlanState;
-  created_at: string;
-  subtask_count: number;
-  completed_count: number;
-}
-
 export interface SubTaskInput {
   name: string;
   description: string;
   expected_outcome: string;
-}
-
-export interface CreatePlanRequest {
-  name: string;
-  description: string;
-  expected_outcome: string;
-  subtasks: SubTaskInput[];
 }
 
 export interface RevisePlanRequest {
@@ -58,5 +42,4 @@ export interface PlanConfig {
   max_subtasks: number | null;
   storage_type: "memory" | "file";
   storage_path: string | null;
-  agent_managed: boolean;
 }

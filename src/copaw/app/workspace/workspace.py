@@ -202,6 +202,15 @@ class Workspace:
         nb = self._service_manager.services.get("plan_notebook")
         if nb is None:
             return
+        try:
+            rm = getattr(nb, "remove_plan_change_hook", None)
+            if callable(rm):
+                rm("copaw_broadcast")
+        except Exception:  # pylint: disable=broad-except
+            logger.debug(
+                "Plan notebook hook removal skipped",
+                exc_info=True,
+            )
         self._service_manager.services["plan_notebook"] = None
 
         runner = self._service_manager.services.get("runner")

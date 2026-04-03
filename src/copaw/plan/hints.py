@@ -12,13 +12,17 @@ Key differences from the AgentScope default:
    constant regardless of how many subtasks have finished.  This
    prevents the "overflow -> truncate -> retry -> overflow" loop that
    occurs when the plan hint grows unboundedly.
-4. **No automatic plans** -- ``no_plan`` is empty so the model is not
-   nudged to create a plan on every turn.  Users start planning with
-   the ``/plan`` command or the console Plan panel instead.
+4. **Scoped ``no_plan`` hint** -- when there is no active plan yet, a
+   short hint tells the model to call ``create_plan`` without
+   browser/web tools first *only if* the user asked for a plan; heavy
+   tooling is deferred to named subtasks after confirmation.
 5. **Stall guard** -- if the same subtask stays ``in_progress`` across
    many consecutive hint generations, the hint escalates to force
    ``finish_subtask`` so the ReAct loop does not repeat the same tool
    calls until ``max_iters`` is hit.
+6. **Console visibility** -- during execution, hints require short
+   user-visible prose each turn (not tool-only replies) so the web
+   console shows what is happening, not only tool invocations.
 """
 from __future__ import annotations
 
@@ -40,9 +44,42 @@ except ImportError:
 _DESC_LIMIT = 80
 _PLAN_DESC_LIMIT = 200
 
-# After this many consecutive system-hint generations for the same
-# in_progress subtask, replace the normal hint with a forced-finish hint.
-_STALL_THRESHOLD = 12
+# After this many consecutive hint generations for the same
+# in_progress subtask, replace the normal hint with a forced-finish
+# directive.  Keep this low — the agent should finish a subtask in
+# a handful of tool calls, not dozens.
+_STALL_THRESHOLD = 6
+
+
+def check_plan_tool_gate(plan_notebook, tool_name: str):
+    """Return an error string if *tool_name* must be blocked, else
+    ``None``.
+
+    Enforces that when a ``/plan`` request is pending (plan mode is
+    on, no plan exists yet, gate flag is set by the runner), only
+    ``create_plan`` may run.  All other tools are rejected with a
+    message instructing the model to call ``create_plan`` first.
+
+    The gate flag ``_copaw_plan_gate`` is set by the runner when a
+    ``/plan <description>`` command is detected and is automatically
+    bypassed once a plan exists (``current_plan is not None``).
+    """
+    if plan_notebook is None:
+        return None
+    if plan_notebook.current_plan is not None:
+        return None
+    if not getattr(plan_notebook, "_copaw_plan_gate", False):
+        return None
+    if tool_name == "create_plan":
+        return None
+    return (
+        f"Tool '{tool_name}' is not available right now. "
+        "You MUST call 'create_plan' first to define the "
+        "plan and its subtasks. Do NOT call browser_use, "
+        "web_search, or any other tool before 'create_plan'. "
+        "Include any research or investigation steps as "
+        "subtasks in the plan."
+    )
 
 
 def _compact_plan_text(plan: "Plan") -> str:
@@ -95,6 +132,23 @@ def _subtask_text(subtask) -> str:
     )
 
 
+def _count_states(plan: "Plan"):
+    """Return (n_todo, n_ip, n_done, n_abn, ip_idx)."""
+    n_todo = n_ip = n_done = n_abn = 0
+    ip_idx = None
+    for idx, st in enumerate(plan.subtasks):
+        if st.state == "todo":
+            n_todo += 1
+        elif st.state == "in_progress":
+            n_ip += 1
+            ip_idx = idx
+        elif st.state == "done":
+            n_done += 1
+        elif st.state == "abandoned":
+            n_abn += 1
+    return n_todo, n_ip, n_done, n_abn, ip_idx
+
+
 if _HAS_DEFAULT_HINT:
 
     class CoPawPlanToHint(DefaultPlanToHint):
@@ -109,7 +163,7 @@ if _HAS_DEFAULT_HINT:
 
         def __init__(self) -> None:
             self._ip_call_count: int = 0
-            self._last_ip_idx: int | None = None
+            self._last_ip_name: str | None = None
 
         _stalled_subtask: str = (
             "The current plan:\n"
@@ -118,7 +172,9 @@ if _HAS_DEFAULT_HINT:
             "```\n"
             "IMPORTANT: Subtask {subtask_idx} ('{subtask_name}') has been "
             "in_progress for {call_count} iterations without completion.\n"
-            "You MUST call 'finish_subtask' NOW with subtask_idx={subtask_idx} "
+            "Briefly tell the user you are wrapping up this subtask "
+            "(one sentence), then call 'finish_subtask' NOW with "
+            "subtask_idx={subtask_idx} "
             "and a summary of what you have accomplished so far (even if "
             "incomplete). Do NOT invoke any other tool before that. If you "
             "have not accomplished anything meaningful, state that clearly "
@@ -143,6 +199,13 @@ if _HAS_DEFAULT_HINT:
             "state='abandoned'.\n"
             "- Do NOT execute any subtask until the user "
             "explicitly confirms.\n"
+            "- Until the user confirms, do NOT use browser, "
+            "web search, or other tools to research the task. "
+            "Summarize the plan in your reply from the user's "
+            "request and reasonable assumptions. Any browsing, "
+            "repo inspection, or heavy investigation must appear "
+            "as explicit todo subtasks and run only after "
+            "confirmation when that subtask is in_progress.\n"
         )
 
         when_a_subtask_in_progress: str = (
@@ -155,16 +218,34 @@ if _HAS_DEFAULT_HINT:
             "```\n"
             "{subtask}\n"
             "```\n"
-            "Work on this subtask using the appropriate "
-            "tools. As soon as the subtask objective is "
-            "achieved, call 'finish_subtask' with a concrete "
-            "outcome summary and move on.\n"
-            "After calling 'finish_subtask', continue directly "
-            "to the next subtask without pausing for user "
-            "input or reporting intermediate status.\n"
-            "If you are unable to make further progress, call "
-            "'finish_subtask' with what you have accomplished "
-            "so far and proceed to the next one.\n"
+            "Execute this subtask efficiently:\n"
+            "1. **User-visible progress (required):** In every "
+            "assistant turn, include plain text the user can read "
+            "before any tool calls. Start with one short paragraph: "
+            "name this subtask (index and title), state what you are "
+            "about to do, and why. Do **not** reply with only tool "
+            "calls and no readable prose in the same turn — the web "
+            "UI must show your reasoning, not just tools.\n"
+            "2. After important tool results, add 1–2 sentences "
+            "interpreting what changed and what you will do next "
+            "before more tools.\n"
+            "3. Use tools to accomplish the objective. Do "
+            "NOT call the same tool with the same or "
+            "similar arguments twice — each call must "
+            "produce genuinely new information.\n"
+            "4. As soon as the objective is achieved OR "
+            "you have gathered enough information, call "
+            "'finish_subtask' immediately with a concrete "
+            "outcome summary.\n"
+            "5. If you cannot make further progress after "
+            "a few tool calls, call 'finish_subtask' with "
+            "what you have and move to the next subtask.\n"
+            "6. After 'finish_subtask', continue directly "
+            "to the next subtask without pausing.\n"
+            "IMPORTANT: Prefer calling 'finish_subtask' "
+            "sooner rather than later. A concise partial "
+            "outcome is better than repeating the same "
+            "action.\n"
         )
 
         when_no_subtask_in_progress: str = (
@@ -174,10 +255,11 @@ if _HAS_DEFAULT_HINT:
             "```\n"
             "The first {index} subtask(s) are done and no "
             "subtask is currently in_progress.\n"
-            "Call 'update_subtask_state' to mark the next "
-            "todo subtask as 'in_progress' and begin "
-            "executing it right away. Do not pause for "
-            "user input.\n"
+            "First, send one short user-visible sentence: what "
+            "was finished and which subtask you are starting next "
+            "(name and goal). Then call 'update_subtask_state' to "
+            "mark the next todo subtask as 'in_progress' and begin "
+            "executing it right away. Do not pause for user input.\n"
         )
 
         at_the_end: str = (
@@ -191,87 +273,72 @@ if _HAS_DEFAULT_HINT:
             "the user.\n"
         )
 
-        # Empty: do not prompt the model to create plans unless the user
-        # explicitly uses /plan <task> or equivalent (see runner pre-process).
-        no_plan: str | None = None
+        # Shown only when plan mode is on and there is no current plan.
+        # Wording avoids autonomous plans: applies when the user is
+        # asking for a breakdown (/plan, etc.), not on every chat turn.
+        no_plan: str | None = (
+            "There is no active plan yet.\n"
+            "If and only if the user is asking for a structured plan "
+            "or step-by-step breakdown (e.g. a /plan-style request), "
+            "call 'create_plan' next with clear subtasks. Do NOT call "
+            "browser_use, web_search, or similar tools before "
+            "'create_plan'; put browsing, repo research, or other "
+            "tool-heavy work into explicit todo subtasks so they run "
+            "after the user confirms the plan and that subtask is "
+            "in_progress.\n"
+            "If the user is not requesting a plan, ignore this block.\n"
+        )
 
         # ---- override __call__ for compact context ----
 
-        def __call__(  # noqa: C901
+        def _ip_hint(self, plan, ip_idx):
+            """Hint for the in-progress subtask, with stall guard."""
+            st = plan.subtasks[ip_idx]
+            ip_key = st.name
+            if ip_key == self._last_ip_name:
+                self._ip_call_count += 1
+            else:
+                self._last_ip_name = ip_key
+                self._ip_call_count = 1
+            compact = _compact_plan_text(plan)
+            if self._ip_call_count > _STALL_THRESHOLD:
+                return self._stalled_subtask.format(
+                    plan=compact,
+                    subtask_idx=ip_idx,
+                    subtask_name=st.name,
+                    call_count=self._ip_call_count,
+                )
+            return self.when_a_subtask_in_progress.format(
+                plan=compact,
+                subtask_idx=ip_idx,
+                subtask_name=st.name,
+                subtask=_subtask_text(st),
+            )
+
+        def __call__(
             self, plan: "Plan | None",
         ) -> str | None:
-            """Generate a hint whose plan section is compact.
+            """Generate a compact hint.
 
             At the beginning (all subtasks *todo*) the full
-            ``plan.to_markdown()`` is used because there are no
-            outcomes yet and the text is small.  Once execution
-            starts, ``_compact_plan_text`` replaces it so that
-            completed-subtask outcomes never inflate the hint.
+            ``plan.to_markdown()`` is used.  Once execution
+            starts, ``_compact_plan_text`` keeps the hint small.
             """
             if plan is None:
-                self._last_ip_idx = None
+                self._last_ip_name = None
                 self._ip_call_count = 0
                 hint = self.no_plan
             else:
-                n_todo = n_ip = n_done = n_abn = 0
-                ip_idx = None
-                for idx, st in enumerate(plan.subtasks):
-                    if st.state == "todo":
-                        n_todo += 1
-                    elif st.state == "in_progress":
-                        n_ip += 1
-                        ip_idx = idx
-                    elif st.state == "done":
-                        n_done += 1
-                    elif st.state == "abandoned":
-                        n_abn += 1
-
+                _, n_ip, n_done, n_abn, ip_idx = (
+                    _count_states(plan)
+                )
                 if n_ip == 0:
-                    self._last_ip_idx = None
+                    self._last_ip_name = None
                     self._ip_call_count = 0
 
-                hint = None
-                if n_ip == 0 and n_done == 0:
-                    hint = self.at_the_beginning.format(
-                        plan=plan.to_markdown(),
-                    )
-                elif n_ip > 0 and ip_idx is not None:
-                    if ip_idx == self._last_ip_idx:
-                        self._ip_call_count += 1
-                    else:
-                        self._last_ip_idx = ip_idx
-                        self._ip_call_count = 1
-                    st = plan.subtasks[ip_idx]
-                    compact = _compact_plan_text(plan)
-                    if self._ip_call_count > _STALL_THRESHOLD:
-                        hint = self._stalled_subtask.format(
-                            plan=compact,
-                            subtask_idx=ip_idx,
-                            subtask_name=st.name,
-                            call_count=self._ip_call_count,
-                        )
-                    else:
-                        hint = (
-                            self.when_a_subtask_in_progress.format(
-                                plan=compact,
-                                subtask_idx=ip_idx,
-                                subtask_name=st.name,
-                                subtask=_subtask_text(st),
-                            )
-                        )
-                elif n_done + n_abn == len(plan.subtasks):
-                    compact = _compact_plan_text(plan)
-                    hint = self.at_the_end.format(
-                        plan=compact,
-                    )
-                elif n_ip == 0 and n_done > 0:
-                    compact = _compact_plan_text(plan)
-                    hint = (
-                        self.when_no_subtask_in_progress.format(
-                            plan=compact,
-                            index=n_done,
-                        )
-                    )
+                hint = self._pick_hint(
+                    plan, n_ip, n_done, n_abn, ip_idx,
+                )
 
             if hint:
                 return (
@@ -280,6 +347,27 @@ if _HAS_DEFAULT_HINT:
                     f"{self.hint_suffix}"
                 )
             return hint
+
+        def _pick_hint(self, plan, n_ip, n_done, n_abn, ip_idx):
+            """Select the right hint template for the plan state."""
+            if n_ip == 0 and n_done == 0:
+                return self.at_the_beginning.format(
+                    plan=plan.to_markdown(),
+                )
+            if n_ip > 0 and ip_idx is not None:
+                return self._ip_hint(plan, ip_idx)
+            if n_done + n_abn == len(plan.subtasks):
+                return self.at_the_end.format(
+                    plan=_compact_plan_text(plan),
+                )
+            if n_ip == 0 and n_done > 0:
+                return (
+                    self.when_no_subtask_in_progress.format(
+                        plan=_compact_plan_text(plan),
+                        index=n_done,
+                    )
+                )
+            return None
 
 else:
     CoPawPlanToHint = None  # type: ignore[misc,assignment]
