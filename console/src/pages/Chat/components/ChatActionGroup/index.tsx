@@ -2,11 +2,17 @@ import React, { useState } from "react";
 import { IconButton } from "@agentscope-ai/design";
 import { SparkHistoryLine, SparkNewChatFill } from "@agentscope-ai/icons";
 import { OrderedListOutlined } from "@ant-design/icons";
+import {
+  SparkHistoryLine,
+  SparkNewChatFill,
+  SparkSearchLine,
+} from "@agentscope-ai/icons";
 import { useChatAnywhereSessions } from "@agentscope-ai/chat";
 import { useTranslation } from "react-i18next";
 import { Flex, Tooltip } from "antd";
 import ChatSessionDrawer from "../ChatSessionDrawer";
 import PlanPanel from "../../../../components/PlanPanel";
+import ChatSearchPanel from "../ChatSearchPanel";
 
 interface ChatActionGroupProps {
   onPlanStartExecution?: () => void;
@@ -18,6 +24,7 @@ const ChatActionGroup: React.FC<ChatActionGroupProps> = ({
   const { t } = useTranslation();
   const [historyOpen, setHistoryOpen] = useState(false);
   const [planOpen, setPlanOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
   const { createSession } = useChatAnywhereSessions();
 
   return (
@@ -36,6 +43,13 @@ const ChatActionGroup: React.FC<ChatActionGroupProps> = ({
           onClick={() => createSession()}
         />
       </Tooltip>
+      <Tooltip title={t("chat.searchTooltip")} mouseEnterDelay={0.5}>
+        <IconButton
+          bordered={false}
+          icon={<SparkSearchLine />}
+          onClick={() => setSearchOpen(true)}
+        />
+      </Tooltip>
       <Tooltip title={t("chat.chatHistoryTooltip")} mouseEnterDelay={0.5}>
         <IconButton
           bordered={false}
@@ -52,6 +66,7 @@ const ChatActionGroup: React.FC<ChatActionGroupProps> = ({
         onClose={() => setPlanOpen(false)}
         onStartExecution={onPlanStartExecution}
       />
+      <ChatSearchPanel open={searchOpen} onClose={() => setSearchOpen(false)} />
     </Flex>
   );
 };
