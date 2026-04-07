@@ -1,6 +1,5 @@
 import React, { useState } from "react";
 import { IconButton } from "@agentscope-ai/design";
-import { SparkHistoryLine, SparkNewChatFill } from "@agentscope-ai/icons";
 import { OrderedListOutlined } from "@ant-design/icons";
 import {
   SparkHistoryLine,
