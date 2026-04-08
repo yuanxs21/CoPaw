@@ -654,6 +654,60 @@ class CoPawAgent(ToolGuardMixin, ReActAgent):
 
     _MEDIA_BLOCK_TYPES = {"image", "audio", "video"}
 
+    _AUTO_CONTINUE_HINT = (
+        "<system-hint>"
+        "Your previous response contained only text without any tool calls. "
+        "If you still have pending actions to complete the user's task, "
+        "please make the appropriate tool call(s) now. "
+        "If the task is genuinely complete, provide a brief summary.\n"
+        "你的上一条回复只有文字、没有调用任何工具。"
+        "如果用户的任务尚未完成，请立即发起对应的工具调用。"
+        "如果任务确已完成，请给出简要总结。"
+        "</system-hint>"
+    )
+
+    async def _auto_continue_if_text_only(
+        self,
+        msg: Msg,
+        tool_choice: Literal["auto", "none", "required"] | None,
+    ) -> Msg:
+        """Nudge the model with a hint when it returns text-only mid-task.
+
+        Instead of keyword matching, injects a bilingual hint into memory
+        and retries with ``tool_choice="auto"``, letting the model itself
+        decide whether more tool calls are needed.  The hint is tagged
+        with ``_MemoryMark.HINT`` so ``ReActAgent._reasoning`` will
+        include it in the prompt and automatically clean it up afterward.
+        """
+        from agentscope.agent._react_agent import _MemoryMark
+
+        running = self._agent_config.running
+        if not running.auto_continue_on_text_only:
+            return msg
+        if running.auto_continue_max_retries <= 0:
+            return msg
+        if tool_choice == "none":
+            return msg
+        if msg is None or msg.has_content_blocks("tool_use"):
+            return msg
+
+        logger.info(
+            "Auto-continue: text-only response detected; "
+            "injecting hint and retrying with tool_choice='required'",
+        )
+        hint_msg = Msg("user", self._AUTO_CONTINUE_HINT, "user")
+        await self.memory.add(hint_msg, marks=_MemoryMark.HINT)
+
+        try:
+            msg = await super()._reasoning(tool_choice="required")
+        except Exception:
+            logger.warning(
+                "Auto-continue retry failed; keeping prior response",
+                exc_info=True,
+            )
+
+        return msg
+
     def _proactive_strip_media_blocks(self) -> int:
         """Proactively strip media blocks from memory before model call.
 
@@ -690,7 +744,7 @@ class CoPawAgent(ToolGuardMixin, ReActAgent):
 
         # --- Passive fallback layer (existing logic) ---
         try:
-            return await super()._reasoning(tool_choice=tool_choice)
+            msg = await super()._reasoning(tool_choice=tool_choice)
         except Exception as e:
             if not self._is_bad_request_or_media_error(e):
                 raise
@@ -714,7 +768,9 @@ class CoPawAgent(ToolGuardMixin, ReActAgent):
                 e,
                 n_stripped,
             )
-            return await super()._reasoning(tool_choice=tool_choice)
+            msg = await super()._reasoning(tool_choice=tool_choice)
+
+        return await self._auto_continue_if_text_only(msg, tool_choice)
 
     async def _summarizing(self) -> Msg:
         """Override summarizing with proactive media filtering,

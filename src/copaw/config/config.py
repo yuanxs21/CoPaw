@@ -451,6 +451,26 @@ class AgentsRunningConfig(BaseModel):
         ),
     )
 
+    auto_continue_on_text_only: bool = Field(
+        default=True,
+        description=(
+            "When the model returns a text-only assistant message (no tool "
+            "calls) whose wording suggests it intends to continue with tools, "
+            "retry the reasoning step with tool_choice='required' so ReAct "
+            "does not exit prematurely."
+        ),
+    )
+
+    auto_continue_max_retries: int = Field(
+        default=2,
+        ge=0,
+        le=5,
+        description=(
+            "Maximum extra reasoning attempts per ReAct step when "
+            "auto_continue_on_text_only triggers (0 disables retries)."
+        ),
+    )
+
     llm_retry_enabled: bool = Field(
         default=LLM_MAX_RETRIES > 0,
         description="Whether to auto-retry transient LLM API errors",
