@@ -194,7 +194,7 @@ class WeixinConfig(BaseChannelConfig):
 
     bot_token:      Bearer token obtained after QR code login.
     bot_token_file: Path to persist/load the bot_token
-                    (default ~/.copaw/weixin_bot_token).
+                    (default ~/.qwenpaw/weixin_bot_token).
     base_url:       iLink API base URL (leave empty to use default).
     media_dir:      Local directory for downloaded media files.
     """
@@ -396,15 +396,6 @@ class MemorySummaryConfig(BaseModel):
     memory_summary_enabled: bool = Field(
         default=True,
         description="Whether to enable memory summarization during compaction",
-    )
-
-    memory_prompt_enabled: bool = Field(
-        default=True,
-        description=(
-            "Whether to include the memory guidance section in the system"
-            " prompt (the <!-- memory:start/end --> block in AGENTS.md)."
-            " Set to False to omit it and save tokens."
-        ),
     )
 
     force_memory_search: bool = Field(
@@ -1250,9 +1241,9 @@ def load_agent_config(agent_id: str) -> AgentProfileConfig:
     with open(agent_config_path, "r", encoding="utf-8") as f:
         data = json.load(f)
 
-    # Normalize legacy ~/.copaw-bound paths to current WORKING_DIR.
+    # Normalize legacy ~/.qwenpaw-bound paths to current WORKING_DIR.
     # This keeps QWENPAW_WORKING_DIR effective even if existing agent.json
-    # contains older hard-coded paths like "~/.copaw/media".
+    # contains older hard-coded paths like "~/.qwenpaw/media".
     try:
         from .utils import _normalize_working_dir_bound_paths
 
@@ -1376,8 +1367,8 @@ def migrate_legacy_config_to_multi_agent() -> bool:
 
     # Migrate existing workspace files from legacy default working dir.
     # When QWENPAW_WORKING_DIR is customized, historical data may still exist
-    # under "~/.copaw".
-    old_workspace = Path("~/.copaw").expanduser().resolve()
+    # under "~/.qwenpaw".
+    old_workspace = Path("~/.qwenpaw").expanduser().resolve()
 
     # Move sessions, memory, and other workspace files
     for item_name in ["sessions", "memory", "jobs.json"]:
