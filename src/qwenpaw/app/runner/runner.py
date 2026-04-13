@@ -214,8 +214,7 @@ class AgentRunner(Runner):
                         type="text",
                         text=(
                             f"**{name}**\n\n"
-                            f"- **command**: `/{name}`, "
-                            f"`/[{name}]`\n"
+                            f"- **command**: `/{name} <input>` to invoke\n"
                             f"- **name**: {display_name}\n"
                             f"- **description**: {desc}\n"
                             f"- **path**: `{skill_dir}`"
