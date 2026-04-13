@@ -21,8 +21,9 @@ jobs:
       - name: Add Under Review label
         uses: actions/github-script@v7
         with:
+          github-token: ${{ secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
           script: |
-            // Get commenter information and PR number
+            // Get commenter/reviewer information and PR details
             let commenter;
             let commenterType;
             let prNumber;
