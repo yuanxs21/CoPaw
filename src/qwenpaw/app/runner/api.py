@@ -151,7 +151,7 @@ def _build_history_prefix(
     compressed = memory_state.get("_compressed_summary", "")
     if compressed:
         prefix.append(
-            Msg("QwenPaw", compressed, "assistant"),
+            Msg("CoPaw", compressed, "assistant"),
         )
 
     plan_state = state.get("plan_notebook", {})
@@ -163,7 +163,7 @@ def _build_history_prefix(
             overview = plan_dict_to_overview(current_plan)
             if overview:
                 prefix.append(
-                    Msg("QwenPaw", overview, "assistant"),
+                    Msg("CoPaw", overview, "assistant"),
                 )
         except Exception:  # pylint: disable=broad-except
             logger.debug(

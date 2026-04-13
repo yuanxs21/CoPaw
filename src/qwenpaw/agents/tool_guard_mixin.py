@@ -349,7 +349,7 @@ class ToolGuardMixin:
         tool_name = str(tool_call.get("name", ""))
         tool_input = tool_call.get("input", {})
 
-        from ..plan.hints import check_plan_tool_gate
+        from copaw.plan.hints import check_plan_tool_gate
 
         gate_msg = check_plan_tool_gate(
             getattr(self, "plan_notebook", None),
