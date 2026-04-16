@@ -46,14 +46,14 @@ def create_plan_notebook(
             storage_path = str(working_dir / "plans" / agent_id)
         storage = FilePlanStorage(storage_path=storage_path)
 
-    from .hints import QwenPawPlanToHint
-    from .notebook import QwenPawPlanNotebook
+    from .hints import ExtendedPlanToHint
+    from .notebook import JsonSubtaskPlanNotebook
 
     plan_to_hint = None
-    if QwenPawPlanToHint is not None:
-        plan_to_hint = QwenPawPlanToHint()
+    if ExtendedPlanToHint is not None:
+        plan_to_hint = ExtendedPlanToHint()
 
-    notebook = QwenPawPlanNotebook(
+    notebook = JsonSubtaskPlanNotebook(
         max_subtasks=config.max_subtasks,
         storage=storage,
         plan_to_hint=plan_to_hint,

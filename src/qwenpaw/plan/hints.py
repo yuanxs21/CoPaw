@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Custom plan-to-hint generator for QwenPaw.
+"""Custom plan-to-hint generator.
 
 Key differences from the AgentScope default:
 
@@ -79,7 +79,7 @@ def set_plan_gate(plan_notebook, enabled: bool = True) -> None:
     """
     if plan_notebook is not None:
         # pylint: disable-next=protected-access
-        plan_notebook._qwenpaw_plan_gate = enabled
+        plan_notebook._plan_tool_gate = enabled
 
 
 def clear_reconfirmation_flag(plan_notebook) -> None:
@@ -90,14 +90,14 @@ def clear_reconfirmation_flag(plan_notebook) -> None:
     """
     if plan_notebook is not None:
         # pylint: disable-next=protected-access
-        plan_notebook._qwenpaw_needs_reconfirmation = False
+        plan_notebook._plan_needs_reconfirmation = False
 
 
 def _needs_reconfirmation_after_revision(plan_notebook) -> bool:
     if plan_notebook is None:
         return False
     return bool(
-        getattr(plan_notebook, "_qwenpaw_needs_reconfirmation", False),
+        getattr(plan_notebook, "_plan_needs_reconfirmation", False),
     )
 
 
@@ -118,11 +118,11 @@ def check_plan_tool_gate(plan_notebook, tool_name: str):
         return None
     if plan_notebook.current_plan is not None:
         # No longer in the "must create_plan first" window; drop stale flag.
-        if getattr(plan_notebook, "_qwenpaw_plan_gate", False):
+        if getattr(plan_notebook, "_plan_tool_gate", False):
             # pylint: disable-next=protected-access
-            plan_notebook._qwenpaw_plan_gate = False
+            plan_notebook._plan_tool_gate = False
         return None
-    if not getattr(plan_notebook, "_qwenpaw_plan_gate", False):
+    if not getattr(plan_notebook, "_plan_tool_gate", False):
         return None
     if tool_name == "create_plan":
         return None
@@ -211,7 +211,7 @@ def _count_states(plan: "Plan"):
 
 if _HAS_DEFAULT_HINT:
 
-    class QwenPawPlanToHint(DefaultPlanToHint):
+    class ExtendedPlanToHint(DefaultPlanToHint):
         """Plan-to-hint generator with bounded context cost.
 
         Overrides ``__call__`` so that ``{plan}`` is replaced with
@@ -543,4 +543,4 @@ if _HAS_DEFAULT_HINT:
             return None
 
 else:
-    QwenPawPlanToHint = None  # type: ignore[misc,assignment]
+    ExtendedPlanToHint = None  # type: ignore[misc,assignment]

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""File-based plan storage for QwenPaw."""
+"""File-based plan storage."""
 from __future__ import annotations
 
 import asyncio

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""QwenPaw PlanNotebook: tolerate LLM tool calls that pass JSON strings."""
+"""PlanNotebook subclass: tolerate LLM tool calls that pass JSON strings."""
 
 import json
 import logging
@@ -48,7 +48,7 @@ def _normalize_subtask_payload(subtask: Any) -> Any:
     return parsed
 
 
-class QwenPawPlanNotebook(PlanNotebook):
+class JsonSubtaskPlanNotebook(PlanNotebook):
     """PlanNotebook subclass; coerce JSON-string subtask tool arguments.
 
     Models sometimes pass subtask as a JSON string; we decode before
@@ -56,7 +56,7 @@ class QwenPawPlanNotebook(PlanNotebook):
 
     When the user (or agent) revises the plan while every subtask is still
     *todo*, we require another explicit confirmation before execution; see
-    :attr:`_qwenpaw_needs_reconfirmation` and plan hints.
+    :attr:`_plan_needs_reconfirmation` and plan hints.
     """
 
     async def create_plan(
@@ -77,7 +77,7 @@ class QwenPawPlanNotebook(PlanNotebook):
             expected_outcome,
             subtasks,
         )
-        self._qwenpaw_needs_reconfirmation = False
+        self._plan_needs_reconfirmation = False
         return resp
 
     async def revise_current_plan(
@@ -95,7 +95,7 @@ class QwenPawPlanNotebook(PlanNotebook):
         plan = self.current_plan
         if plan is not None and plan.subtasks:
             if all(st.state == "todo" for st in plan.subtasks):
-                self._qwenpaw_needs_reconfirmation = True
+                self._plan_needs_reconfirmation = True
         return resp
 
     async def update_subtask_state(
@@ -105,5 +105,5 @@ class QwenPawPlanNotebook(PlanNotebook):
     ) -> ToolResponse:
         resp = await super().update_subtask_state(subtask_idx, state)
         if state == "in_progress":
-            self._qwenpaw_needs_reconfirmation = False
+            self._plan_needs_reconfirmation = False
         return resp

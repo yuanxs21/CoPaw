@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""QwenPaw plan module — factory functions and storage for PlanNotebook."""
+"""Plan mode: factory functions and storage for PlanNotebook."""
 from .factory import create_plan_notebook
 from .hints import (
-    QwenPawPlanToHint,
+    ExtendedPlanToHint,
     check_plan_tool_gate,
     clear_reconfirmation_flag,
     set_plan_gate,
@@ -13,7 +13,7 @@ from .repeat_guard import check_plan_repeat_guard
 
 __all__ = [
     "create_plan_notebook",
-    "QwenPawPlanToHint",
+    "ExtendedPlanToHint",
     "check_plan_tool_gate",
     "set_plan_gate",
     "clear_reconfirmation_flag",

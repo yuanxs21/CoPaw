@@ -52,8 +52,9 @@ def _tool_fingerprint(tool_name: str, tool_input: Any) -> str:
 
 
 def _reset_repeat_state(plan_notebook) -> None:
-    plan_notebook._qwenpaw_repeat_fp = None  # pylint: disable=protected-access
-    plan_notebook._qwenpaw_repeat_count = 0  # pylint: disable=protected-access
+    # pylint: disable=protected-access
+    plan_notebook._plan_repeat_fingerprint = None
+    plan_notebook._plan_repeat_count = 0
 
 
 def check_plan_repeat_guard(
@@ -79,28 +80,28 @@ def check_plan_repeat_guard(
             _reset_repeat_state(plan_notebook)
         return None
 
-    if not hasattr(plan_notebook, "_qwenpaw_repeat_fp"):
+    if not hasattr(plan_notebook, "_plan_repeat_fingerprint"):
         _reset_repeat_state(plan_notebook)
 
     fp = _tool_fingerprint(tool_name, tool_input)
-    last_fp = getattr(plan_notebook, "_qwenpaw_repeat_fp", None)
+    last_fp = getattr(plan_notebook, "_plan_repeat_fingerprint", None)
     # pylint: disable=protected-access
     if fp == last_fp:
-        plan_notebook._qwenpaw_repeat_count = (
+        plan_notebook._plan_repeat_count = (
             int(
                 getattr(
                     plan_notebook,
-                    "_qwenpaw_repeat_count",
+                    "_plan_repeat_count",
                     0,
                 ),
             )
             + 1
         )
     else:
-        plan_notebook._qwenpaw_repeat_fp = fp
-        plan_notebook._qwenpaw_repeat_count = 1
+        plan_notebook._plan_repeat_fingerprint = fp
+        plan_notebook._plan_repeat_count = 1
 
-    count = int(getattr(plan_notebook, "_qwenpaw_repeat_count", 0))
+    count = int(getattr(plan_notebook, "_plan_repeat_count", 0))
     if count >= _REPEAT_THRESHOLD:
         logger.warning(
             "Plan repeat guard: blocking identical tool=%s "
