@@ -1,10 +1,9 @@
 /**
- * Expose host dependencies on `window.__QWENPAW__` so that plugin UI modules
- * can reference React, antd, etc. without bundling their own copies.
+ * hostExternals.ts
  *
- * Also installs `window.__registerPlugin` — the single entry point for
- * plugins to register their routes, tool renderers, and other UI
- * capabilities.
+ * Exposes shared host dependencies and a reactive plugin registry on
+ * `window.QwenPaw` so plugin bundles can register routes and tool renderers
+ * without bundling their own copies of React / antd.
  *
  * Call `installHostExternals()` once at application startup (main.tsx).
  */
@@ -17,9 +16,12 @@ import { getApiUrl, getApiToken } from "../api/config";
 
 declare const VITE_API_BASE_URL: string;
 
-// ── Host externals (shared dependencies) ────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Public types
+// ─────────────────────────────────────────────────────────────────────────────
 
-export interface CoPawHostExternals {
+/** Shared host dependencies exposed to plugin bundles via `window.QwenPaw.host`. */
+export interface HostExternals {
   React: typeof React;
   ReactDOM: typeof ReactDOM;
   antd: typeof antd;
@@ -29,50 +31,129 @@ export interface CoPawHostExternals {
   getApiToken: typeof getApiToken;
 }
 
-// ── Plugin registration types ───────────────────────────────────────────
-
 export interface PluginRouteDeclaration {
+  /** Full URL path, e.g. "/plugin/my-plugin/dashboard". */
   path: string;
   component: React.ComponentType;
+  /** Sidebar display label. */
   label: string;
+  /** Emoji or short icon text. */
   icon?: string;
+  /** Lower number = appears earlier in sidebar. Defaults to 0. */
+  priority?: number;
 }
 
-export interface PluginCapabilities {
-  routes?: PluginRouteDeclaration[];
-  toolRenderers?: Record<string, React.FC<any>>;
-}
-
+/** Internal per-plugin registration record. */
 export interface PluginRegistration {
   pluginId: string;
-  capabilities: PluginCapabilities;
+  routes: PluginRouteDeclaration[];
+  toolRenderers: Record<string, React.FC<any>>;
 }
 
-/** Callback type for `window.__registerPlugin`. */
-export type RegisterPluginFn = (
-  pluginId: string,
-  capabilities: PluginCapabilities,
-) => void;
+// ─────────────────────────────────────────────────────────────────────────────
+// PluginSystem — reactive singleton
+// ─────────────────────────────────────────────────────────────────────────────
 
-// ── Global declarations ─────────────────────────────────────────────────
+class PluginSystem {
+  private records = new Map<string, PluginRegistration>();
+  private listeners = new Set<() => void>();
 
-declare global {
-  interface Window {
-    __QWENPAW__: CoPawHostExternals;
-    __registerPlugin?: RegisterPluginFn;
-    /** Internal: accumulated plugin registrations. */
-    __pluginRegistrations__?: PluginRegistration[];
+  // ── Write API ───────────────────────────────────────────────────────────
+
+  addRoutes(pluginId: string, routes: PluginRouteDeclaration[]): void {
+    const rec = this._record(pluginId);
+    rec.routes.push(...routes);
+    this._notify();
+  }
+
+  addToolRenderers(
+    pluginId: string,
+    renderers: Record<string, React.FC<any>>,
+  ): void {
+    const rec = this._record(pluginId);
+    Object.assign(rec.toolRenderers, renderers);
+    this._notify();
+  }
+
+  // ── Read API (consumed by PluginContext / usePlugins) ────────────────────
+
+  /** Merged map of all tool renderers across all plugins. */
+  getToolRenderConfig(): Record<string, React.FC<any>> {
+    const out: Record<string, React.FC<any>> = {};
+    for (const rec of this.records.values())
+      Object.assign(out, rec.toolRenderers);
+    return out;
+  }
+
+  /** Flat list of all page routes across all plugins, sorted by priority. */
+  getRoutes(): PluginRouteDeclaration[] {
+    const out: PluginRouteDeclaration[] = [];
+    for (const rec of this.records.values()) out.push(...rec.routes);
+    return out.sort((a, b) => (a.priority ?? 0) - (b.priority ?? 0));
+  }
+
+  // ── Subscription ─────────────────────────────────────────────────────────
+
+  /** Subscribe to any registration change. Returns an unsubscribe function. */
+  subscribe(fn: () => void): () => void {
+    this.listeners.add(fn);
+    return () => this.listeners.delete(fn);
+  }
+
+  // ── Internals ────────────────────────────────────────────────────────────
+
+  private _record(pluginId: string): PluginRegistration {
+    if (!this.records.has(pluginId)) {
+      this.records.set(pluginId, { pluginId, routes: [], toolRenderers: {} });
+    }
+    return this.records.get(pluginId)!;
+  }
+
+  private _notify(): void {
+    this.listeners.forEach((fn) => fn());
   }
 }
 
-// ── Install ─────────────────────────────────────────────────────────────
+/** Global singleton — imported by PluginContext to subscribe to changes. */
+export const pluginSystem = new PluginSystem();
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Global declarations
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Namespace object. */
+export interface WindowNamespace {
+  /** Shared host dependencies (React, antd, API helpers). */
+  host: HostExternals;
+  /** Register page routes for a plugin. */
+  registerRoutes?: (pluginId: string, routes: PluginRouteDeclaration[]) => void;
+  /** Register tool-call renderers for a plugin. */
+  registerToolRender?: (
+    pluginId: string,
+    renderers: Record<string, React.FC<any>>,
+  ) => void;
+}
+
+declare global {
+  interface Window {
+    QwenPaw: WindowNamespace;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Install (call once in main.tsx)
+// ─────────────────────────────────────────────────────────────────────────────
 
 export function installHostExternals(): void {
   const apiBaseUrl =
     typeof VITE_API_BASE_URL !== "undefined" ? VITE_API_BASE_URL : "";
 
-  if (!window.__QWENPAW__) {
-    window.__QWENPAW__ = {
+  if (!window.QwenPaw) {
+    (window as any).QwenPaw = {} as WindowNamespace;
+  }
+
+  if (!window.QwenPaw.host) {
+    window.QwenPaw.host = {
       React,
       ReactDOM,
       antd,
@@ -83,18 +164,23 @@ export function installHostExternals(): void {
     };
   }
 
-  // Always ensure the plugin registration API is available
-  if (!window.__pluginRegistrations__) {
-    window.__pluginRegistrations__ = [];
+  if (!window.QwenPaw.registerRoutes) {
+    window.QwenPaw.registerRoutes = (pluginId, routes) => {
+      pluginSystem.addRoutes(pluginId, routes);
+      console.info(
+        `[plugin:${pluginId}] registerRoutes → ${routes.length} route(s)`,
+      );
+    };
   }
 
-  if (!window.__registerPlugin) {
-    window.__registerPlugin = (
-      pluginId: string,
-      capabilities: PluginCapabilities,
-    ) => {
-      window.__pluginRegistrations__!.push({ pluginId, capabilities });
-      console.info(`[plugin] Registered "${pluginId}"`);
+  if (!window.QwenPaw.registerToolRender) {
+    window.QwenPaw.registerToolRender = (pluginId, renderers) => {
+      pluginSystem.addToolRenderers(pluginId, renderers);
+      console.info(
+        `[plugin:${pluginId}] registerToolRender → ${Object.keys(
+          renderers,
+        ).join(", ")}`,
+      );
     };
   }
 }

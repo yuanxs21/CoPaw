@@ -53,7 +53,8 @@
     "tools": "ツール",
     "voiceTranscription": "音声文字起こし",
     "agents": "エージェント管理",
-    "debug": "デバッグ"
+    "debug": "デバッグ",
+    "plugins": "プラグイン"
   },
   "debug": {
     "title": "デバッグ",
