@@ -1,5 +1,6 @@
 export * from "./agent";
 export * from "./agents";
+export * from "./agentStats";
 export * from "./channel";
 export * from "./heartbeat";
 export * from "./chat";
@@ -11,3 +12,4 @@ export * from "./skill";
 export * from "./workspace";
 export * from "./tokenUsage";
 export * from "./plan";
+export * from "./backup";

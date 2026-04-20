@@ -18,11 +18,13 @@ import { workspaceApi } from "./modules/workspace";
 import { localModelApi } from "./modules/localModel";
 import { mcpApi } from "./modules/mcp";
 import { tokenUsageApi } from "./modules/tokenUsage";
+import { agentStatsApi } from "./modules/agentStats";
 import { toolsApi } from "./modules/tools";
 import { securityApi } from "./modules/security";
 import { userTimezoneApi } from "./modules/userTimezone";
 import { languageApi } from "./modules/language";
 import { planApi } from "./modules/plan";
+import { backupApi } from "./modules/backup";
 
 export const api = {
   // Root
@@ -66,6 +68,8 @@ export const api = {
 
   // Token Usage
   ...tokenUsageApi,
+  // Agent Statistics
+  ...agentStatsApi,
   // Tools
   ...toolsApi,
 
@@ -80,6 +84,9 @@ export const api = {
 
   // Plan
   ...planApi,
+
+  // Backups
+  ...backupApi,
 };
 
 export default api;
