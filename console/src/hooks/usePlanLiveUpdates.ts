@@ -18,24 +18,27 @@ export function usePlanLiveUpdates(
   const [planEnabled, setPlanEnabled] = useState<boolean | null>(null);
   const [livePlan, setLivePlan] = useState<Plan | null | undefined>(undefined);
 
-  const refresh = useCallback(() => {
+  const fetchPlanConfig = useCallback(() => {
     api
       .getPlanConfig()
       .then((cfg) => setPlanEnabled(cfg.enabled))
       .catch(() => setPlanEnabled(false));
-    api
-      .getCurrentPlan()
-      .then(setLivePlan)
-      .catch(() => setLivePlan(null));
-  }, [selectedAgent]);
+  }, []);
+
+  // Session/agent isolation: when scope changes, drop any cached plan from
+  // the previous session so the Plan panel does not show another session's
+  // plan while SSE re-subscribes / hydrates a snapshot for the new scope.
+  useEffect(() => {
+    setLivePlan(null);
+  }, [sessionScope, selectedAgent]);
 
   useEffect(() => {
     if (!chatPageActive) {
       setPlanEnabled(null);
       return;
     }
-    refresh();
-  }, [chatPageActive, selectedAgent, refresh, sessionScope]);
+    fetchPlanConfig();
+  }, [chatPageActive, selectedAgent, sessionScope, fetchPlanConfig]);
 
   useEffect(() => {
     if (!chatPageActive || !planEnabled) return;
@@ -58,5 +61,5 @@ export function usePlanLiveUpdates(
     };
   }, [chatPageActive, planEnabled, selectedAgent, sessionScope]);
 
-  return { livePlan, planEnabled, refresh };
+  return { livePlan, planEnabled };
 }

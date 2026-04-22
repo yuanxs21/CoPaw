@@ -57,33 +57,6 @@ const stateIcon = (state: SubTask["state"]) => {
   }
 };
 
-type ActionLabelLanguage = "en" | "zh" | "ja" | "ru";
-
-function detectPlanActionLanguage(
-  plan: Plan | null,
-): ActionLabelLanguage | null {
-  if (!plan) return null;
-  const text = [
-    plan.name,
-    plan.description,
-    ...plan.subtasks.flatMap((st) => [
-      st.name,
-      st.description,
-      st.expected_outcome,
-    ]),
-  ]
-    .filter((v) => typeof v === "string" && v.trim().length > 0)
-    .join(" ");
-  if (!text) return null;
-
-  // Prefer script-specific matches first; then fall back to Latin as English.
-  if (/[\u3040-\u30ff]/u.test(text)) return "ja";
-  if (/[\u0400-\u04FF]/u.test(text)) return "ru";
-  if (/[\u4e00-\u9fff]/u.test(text)) return "zh";
-  if (/[A-Za-z]/.test(text)) return "en";
-  return null;
-}
-
 interface PlanPanelProps {
   open: boolean;
   onClose: () => void;
@@ -111,7 +84,7 @@ const PlanPanel: React.FC<PlanPanelProps> = ({
   livePlanFromChat,
   chatStreamsPlan = false,
 }) => {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const [plan, setPlan] = useState<Plan | null>(null);
   const [planEnabled, setPlanEnabled] = useState<boolean | null>(null);
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
@@ -132,9 +105,18 @@ const PlanPanel: React.FC<PlanPanelProps> = ({
       .catch(() => setPlanEnabled(false));
     api
       .getCurrentPlan()
-      .then(setPlan)
-      .catch(() => setPlan(null));
-  }, []);
+      .then((latest) => {
+        if (latest !== null) {
+          setPlan(latest);
+          return;
+        }
+        // Chat page owns plan via SSE; ignore a lone null from /plan/current.
+        if (!chatStreamsPlan) setPlan(null);
+      })
+      .catch(() => {
+        if (!chatStreamsPlan) setPlan(null);
+      });
+  }, [chatStreamsPlan]);
 
   useEffect(() => {
     if (!open) return;
@@ -146,28 +128,6 @@ const PlanPanel: React.FC<PlanPanelProps> = ({
     if (livePlanFromChat === undefined) return;
     setPlan(livePlanFromChat ?? null);
   }, [chatStreamsPlan, livePlanFromChat]);
-
-  // Safety-net poll: while the panel is open and plan mode is enabled but
-  // the panel has not yet seen a plan, pull ``/plan/current`` periodically.
-  // This recovers the "open panel first, then create plan" scenario when
-  // the SSE broadcast was registered before the chat session resolved its
-  // backend ``session_id`` (so the scoped event was missed). The poll stops
-  // immediately once a plan appears or the panel closes.
-  useEffect(() => {
-    if (!open || planEnabled !== true) return;
-    if (plan !== null) return;
-    const timer = setInterval(() => {
-      api
-        .getCurrentPlan()
-        .then((latest) => {
-          if (latest !== null) setPlan(latest);
-        })
-        .catch(() => {
-          /* transient network / auth errors; next tick retries */
-        });
-    }, 1500);
-    return () => clearInterval(timer);
-  }, [open, planEnabled, plan]);
 
   useEffect(() => {
     if (chatStreamsPlan) return;
@@ -204,23 +164,6 @@ const PlanPanel: React.FC<PlanPanelProps> = ({
 
   const needsConfirmation =
     isActive && plan.subtasks.every((s) => s.state === "todo");
-
-  const actionLabelLanguage = useMemo(
-    () => detectPlanActionLanguage(plan),
-    [plan],
-  );
-  const actionT = useCallback(
-    (key: string, fallback: string) =>
-      String(
-        i18n.t(key, {
-          defaultValue: fallback,
-          ...(actionLabelLanguage ? { lng: actionLabelLanguage } : {}),
-        }),
-      ),
-    [i18n, actionLabelLanguage],
-  );
-  const startExecutionLabel = actionT("plan.startExecution", "Start execution");
-  const cancelPlanLabel = actionT("plan.cancel", "Cancel Plan");
 
   // --- handlers ---
 
@@ -587,13 +530,13 @@ const PlanPanel: React.FC<PlanPanelProps> = ({
                         "plan.startExecutionConfirmHint",
                         "The agent will run tools according to the plan. This matches sending a follow-up message in chat.",
                       )}
-                      okText={startExecutionLabel}
+                      okText={t("plan.startExecution", "Start execution")}
                       cancelText={t("common.cancel", "Cancel")}
                       okButtonProps={{ loading: confirming }}
                       onConfirm={handleConfirmPlan}
                     >
                       <Button type="primary" size="small" disabled={confirming}>
-                        {startExecutionLabel}
+                        {t("plan.startExecution", "Start execution")}
                       </Button>
                     </Popconfirm>
                     <Popconfirm
@@ -605,13 +548,13 @@ const PlanPanel: React.FC<PlanPanelProps> = ({
                         "plan.cancelConfirmHint",
                         "The plan will be abandoned. You can create a new plan later.",
                       )}
-                      okText={cancelPlanLabel}
+                      okText={t("plan.cancel", "Cancel Plan")}
                       cancelText={t("common.cancel", "Cancel")}
                       okButtonProps={{ loading: abandoning }}
                       onConfirm={handleAbandonPlan}
                     >
                       <Button size="small" loading={abandoning}>
-                        {cancelPlanLabel}
+                        {t("plan.cancel", "Cancel Plan")}
                       </Button>
                     </Popconfirm>
                   </Flex>

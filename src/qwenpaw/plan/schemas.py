@@ -67,8 +67,6 @@ class PlanConfigUpdateRequest(BaseModel):
 
     enabled: bool = Field(default=False)
     max_subtasks: Optional[int] = Field(default=None)
-    storage_type: Literal["memory", "file"] = Field(default="memory")
-    storage_path: Optional[str] = Field(default=None)
 
 
 def plan_to_response(plan: "Plan") -> PlanStateResponse:

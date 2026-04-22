@@ -1351,6 +1351,9 @@
     "stopConfirm": "确定要停止此计划吗？计划将标记为已放弃。",
     "stoppedSuccess": "计划已停止",
     "stoppedError": "停止计划失败",
+    "loadingConfig": "正在加载计划设置\u2026",
+    "cancelConfirm": "确定要在执行前取消此计划吗？",
+    "cancelConfirmHint": "计划将被放弃，你可以稍后创建新的计划。",
     "cancelledSuccess": "计划已取消",
     "cancelledError": "取消计划失败"
   },

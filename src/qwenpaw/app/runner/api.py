@@ -154,8 +154,12 @@ def _build_history_prefix(
             Msg("QwenPaw", compressed, "assistant"),
         )
 
-    plan_state = state.get("plan_notebook", {})
-    current_plan = plan_state.get("current_plan")
+    plan_state = state.get("plan_notebook") or {}
+    current_plan = (
+        plan_state.get("current_plan")
+        if isinstance(plan_state, dict)
+        else None
+    )
     if current_plan and isinstance(current_plan, dict):
         try:
             from ...plan.schemas import plan_dict_to_overview

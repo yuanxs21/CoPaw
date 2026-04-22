@@ -865,14 +865,6 @@ class PlanConfig(BaseModel):
         default=None,
         description="Max subtasks per plan (None = unlimited)",
     )
-    storage_type: Literal["memory", "file"] = Field(
-        default="memory",
-        description="Plan storage backend",
-    )
-    storage_path: str | None = Field(
-        default=None,
-        description="Path for file-based storage (auto-derived if None)",
-    )
 
 
 class AgentProfileConfig(BaseModel):

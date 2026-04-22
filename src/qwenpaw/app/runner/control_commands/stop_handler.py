@@ -11,6 +11,7 @@ import logging
 from ....plan.broadcast import plan_sse_scope
 from ....plan.session_sync import (
     clear_plan_notebook_if_session_has_no_snapshot,
+    hydrate_plan_from_store,
     persist_plan_notebook_to_session,
     reset_plan_notebook_for_session_switch,
 )
@@ -61,20 +62,12 @@ class StopCommandHandler(BaseControlCommandHandler):
                     session=sess,
                     plan_notebook=nb,
                     session_id=target_session_id,
-                    user_id=user_id,
                     agent_id=workspace.agent_id,
                 )
-                try:
-                    await sess.load_session_state(
-                        session_id=target_session_id,
-                        user_id=user_id,
-                        plan_notebook=nb,
-                    )
-                except KeyError as e:
-                    logger.warning(
-                        "/stop plan hydrate skipped (schema mismatch): %s",
-                        e,
-                    )
+                hydrate_plan_from_store(
+                    session_id=target_session_id,
+                    plan_notebook=nb,
+                )
                 had_plan = getattr(nb, "current_plan", None) is not None
                 if had_plan:
                     await reset_plan_notebook_for_session_switch(

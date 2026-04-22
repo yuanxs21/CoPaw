@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import importlib.util
 import logging
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -18,13 +17,13 @@ _PLAN_AVAILABLE = importlib.util.find_spec("agentscope.plan") is not None
 
 def create_plan_notebook(
     config: "PlanConfig",
-    agent_id: str,
-    working_dir: Path,
 ) -> PlanNotebook | None:
     """Instantiate PlanNotebook from PlanConfig.
 
     Returns None when plan is disabled or the agentscope plan module
     is not available (avoids import-time side effects).
+
+    Plans are stored in ephemeral memory only (cleared on restart).
     """
     if not config.enabled:
         return None
@@ -37,15 +36,6 @@ def create_plan_notebook(
         )
         return None
 
-    from .storage import FilePlanStorage
-
-    storage = None
-    if config.storage_type == "file":
-        storage_path = config.storage_path
-        if storage_path is None:
-            storage_path = str(working_dir / "plans" / agent_id)
-        storage = FilePlanStorage(storage_path=storage_path)
-
     from .hints import ExtendedPlanToHint
     from .notebook import JsonSubtaskPlanNotebook
 
@@ -55,9 +45,13 @@ def create_plan_notebook(
 
     notebook = JsonSubtaskPlanNotebook(
         max_subtasks=config.max_subtasks,
-        storage=storage,
+        storage=None,
         plan_to_hint=plan_to_hint,
     )
+    # Keep historical tool methods callable for AgentScope toolkit
+    # registration.
+    # They are blocked by plan tool gate and overridden in notebook to return
+    # explicit "disabled" responses.
     if plan_to_hint is not None:
         plan_to_hint.bind_notebook(notebook)
     return notebook

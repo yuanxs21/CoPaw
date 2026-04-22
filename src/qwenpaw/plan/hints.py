@@ -25,8 +25,10 @@ Key differences from the AgentScope default:
    one tool call per turn while a plan runs; otherwise the ReAct loop
    exits early. A short prose line may accompany tools for visibility.
 """
+
 from __future__ import annotations
 
+import inspect
 import logging
 import weakref
 from typing import TYPE_CHECKING, Any
@@ -110,6 +112,26 @@ def should_skip_auto_continue(plan_notebook) -> bool:
             plan_notebook._plan_needs_reconfirmation = False
         return True
 
+    # One-shot guard: in a fresh empty session, we may ask a clarification
+    # question first. Suppress text-only auto-continue in the same turn so
+    # the model does not immediately run broad workspace probes (glob/grep)
+    # right after that clarification prompt.
+    if (
+        bool(
+            getattr(
+                plan_notebook,
+                "_plan_fresh_session_block_auto_continue",
+                False,
+            ),
+        )
+        and not bool(getattr(plan_notebook, "_plan_tool_gate", False))
+        and getattr(plan_notebook, "current_plan", None) is None
+    ):
+        # Consume one-shot fresh-session auto-continue guard.
+        # pylint: disable-next=protected-access
+        plan_notebook._plan_fresh_session_block_auto_continue = False
+        return True
+
     # Persistent guard: after finish/cancel, prevent text-only auto-continue
     # from drifting back to the stale plan in this turn AND in subsequent
     # turns, until the user explicitly opts in again. The marker is reset
@@ -141,6 +163,11 @@ def set_plan_gate(plan_notebook, enabled: bool = True) -> None:
     if plan_notebook is not None:
         # pylint: disable-next=protected-access
         plan_notebook._plan_tool_gate = enabled
+        # ``True`` is armed only for the immediate /plan request flow.
+        # Session-sync may consume this one-shot marker to preserve gate once
+        # during notebook reset/hydration, preventing cross-session stickiness.
+        # pylint: disable-next=protected-access
+        plan_notebook._plan_tool_gate_preserve_once = bool(enabled)
 
 
 def should_emit_no_plan_hint(plan_notebook) -> bool:
@@ -178,6 +205,17 @@ def should_emit_recently_finished_plan_guard(plan_notebook) -> bool:
     return bool(getattr(plan_notebook, "_plan_recently_finished", False))
 
 
+def should_emit_fresh_session_no_plan_guard(plan_notebook) -> bool:
+    """Return whether to emit a one-shot guard for fresh empty sessions."""
+    if plan_notebook is None:
+        return False
+    if bool(getattr(plan_notebook, "_plan_tool_gate", False)):
+        return False
+    if getattr(plan_notebook, "current_plan", None) is not None:
+        return False
+    return bool(getattr(plan_notebook, "_plan_fresh_session_no_plan", False))
+
+
 def _needs_reconfirmation_after_revision(plan_notebook) -> bool:
     if plan_notebook is None:
         return False
@@ -186,7 +224,63 @@ def _needs_reconfirmation_after_revision(plan_notebook) -> bool:
     )
 
 
-def check_plan_tool_gate(plan_notebook, tool_name: str):
+_SENSITIVE_SESSION_PATH_TOKENS = (
+    "/sessions/",
+    "/memory/",
+    "/plans/",
+    "/logs/",
+    "/.copaw/",
+)
+
+
+def _extract_tool_input_from_caller(max_depth: int = 8) -> dict[str, Any]:
+    """Best-effort extract tool input from recent caller frames."""
+    frame = inspect.currentframe()
+    try:
+        cur = frame.f_back if frame is not None else None
+        depth = 0
+        while cur is not None and depth < max_depth:
+            raw = cur.f_locals.get("tool_input")
+            if isinstance(raw, dict):
+                return raw
+            tool_call = cur.f_locals.get("tool_call")
+            if isinstance(tool_call, dict):
+                tc_input = tool_call.get("input")
+                if isinstance(tc_input, dict):
+                    return tc_input
+            cur = cur.f_back
+            depth += 1
+        return {}
+    finally:
+        # Avoid reference cycles from frame objects.
+        del frame
+
+
+def _normalize_probe_text(raw: Any) -> str:
+    text = str(raw or "").strip().lower().replace("\\", "/")
+    if not text:
+        return ""
+    if text.startswith("./"):
+        text = text[2:]
+    return "/" + text if not text.startswith("/") else text
+
+
+def _contains_sensitive_session_path(raw: Any) -> bool:
+    text = _normalize_probe_text(raw)
+    if not text:
+        return False
+    return any(tok in text for tok in _SENSITIVE_SESSION_PATH_TOKENS)
+
+
+def _is_broad_probe_pattern(raw: Any) -> bool:
+    p = _normalize_probe_text(raw).strip("/")
+    return p in {"*", "**", "**/*", "*.*", "."}
+
+
+def check_plan_tool_gate(  # pylint: disable=too-many-branches
+    plan_notebook,
+    tool_name: str,
+):
     """Return an error string if *tool_name* must be blocked, else
     ``None``.
 
@@ -199,32 +293,141 @@ def check_plan_tool_gate(plan_notebook, tool_name: str):
     cleared once a plan exists (``create_plan`` succeeded) or when the
     HTTP API finishes the plan, so it does not stick across sessions.
     """
-    if plan_notebook is None:
-        return None
-    if plan_notebook.current_plan is not None:
-        # No longer in the "must create_plan first" window; drop stale flag.
-        if getattr(plan_notebook, "_plan_tool_gate", False):
-            # pylint: disable-next=protected-access
-            plan_notebook._plan_tool_gate = False
-        return None
-    if not getattr(plan_notebook, "_plan_tool_gate", False):
-        return None
-    if tool_name == "create_plan":
-        return None
-    return (
-        f"Tool '{tool_name}' is not available right now. "
-        "You MUST call 'create_plan' first to define the "
-        "plan and its subtasks. Do NOT call browser_use, "
-        "web_search, or any other tool before 'create_plan'. "
-        "Decompose the user's request into a **logical pipeline**: "
-        "each subtask needs a clear name, description, and measurable "
-        "expected_outcome; order steps so dependencies run earlier "
-        "(understand → act → verify → report). Put research, repo "
-        "reading, and heavy tooling into named subtasks for after "
-        "user confirmation. "
-        "Write plan and subtask text in the same language as the "
-        "user's request when it is identifiable."
-    )
+    # AgentScope's PlanNotebook still exposes these tools on the class;
+    # block them here so the underlying implementations never run (new
+    # sessions must not search or recover prior-session plans).
+    if tool_name in (
+        "view_historical_plans",
+        "recover_historical_plan",
+    ):
+        return (
+            "Historical plan tools are disabled. Do not call "
+            "'view_historical_plans' or 'recover_historical_plan'. "
+            "Plans are session-scoped and ephemeral; there is no plan "
+            "history to list or recover across sessions. "
+            "Answer the user using only the current conversation. "
+            "If context is insufficient, ask a concise clarification instead "
+            "of probing workspace history."
+        )
+
+    blocked_reason = None
+
+    if plan_notebook is not None:
+        # Fresh-session hard guard (first turn only): block probing
+        # session/memory/history artifacts from workspace tools.
+        if (
+            bool(
+                getattr(
+                    plan_notebook,
+                    "_plan_fresh_session_probe_guard",
+                    False,
+                ),
+            )
+            and plan_notebook.current_plan is None
+            and not bool(getattr(plan_notebook, "_plan_tool_gate", False))
+        ):
+            tool_input = _extract_tool_input_from_caller()
+            if not tool_input and tool_name in (
+                "glob_search",
+                "read_file",
+                "grep_search",
+            ):
+                return (
+                    "Fresh session privacy guard: probing tools are blocked "
+                    "until the user provides explicit scope in this session."
+                )
+            if tool_name == "glob_search":
+                pattern = tool_input.get("pattern", "")
+                search_path = tool_input.get("path", "")
+                if _is_broad_probe_pattern(pattern) or (
+                    _contains_sensitive_session_path(pattern)
+                    or _contains_sensitive_session_path(search_path)
+                ):
+                    return (
+                        "Fresh session privacy guard: do not probe workspace "
+                        "history files (sessions/memory/plans/logs) or run "
+                        "broad glob scans. Ask a concise clarification first; "
+                        "after user scope is explicit, use targeted tools."
+                    )
+            if tool_name == "read_file":
+                file_path = tool_input.get("file_path", "") or tool_input.get(
+                    "path",
+                    "",
+                )
+                if _contains_sensitive_session_path(file_path):
+                    return (
+                        "Fresh session privacy guard: reading "
+                        "sessions/memory/plans/logs history files is blocked. "
+                        "Ask the user to provide context in this conversation "
+                        "or give a new concrete task."
+                    )
+            if tool_name == "grep_search":
+                search_path = tool_input.get("path", "")
+                if _contains_sensitive_session_path(search_path):
+                    return (
+                        "Fresh session privacy guard: grep on "
+                        "sessions/memory/plans/logs history paths is blocked. "
+                        "Use only current-conversation context."
+                    )
+
+        if plan_notebook.current_plan is not None:
+            # No longer in the "must create_plan first" window;
+            # drop stale flag.
+            if getattr(plan_notebook, "_plan_tool_gate", False):
+                set_plan_gate(plan_notebook, False)
+
+            # Block execution-starting tools while the plan awaits user
+            # confirmation (all subtasks still ``todo`` and the just-created
+            # or just-revised marker is set). This prevents the model from
+            # calling ``update_subtask_state`` in the same reasoning pass
+            # that created the plan, bypassing the confirmation step.
+            if tool_name == "update_subtask_state" and (
+                bool(
+                    getattr(
+                        plan_notebook,
+                        "_plan_just_mutated",
+                        False,
+                    ),
+                )
+                or bool(
+                    getattr(
+                        plan_notebook,
+                        "_plan_needs_reconfirmation",
+                        False,
+                    ),
+                )
+            ):
+                plan = plan_notebook.current_plan
+                if all(st.state == "todo" for st in plan.subtasks):
+                    blocked_reason = (
+                        "The plan has just been created or "
+                        "revised. Present it to the user "
+                        "and wait for explicit confirmation "
+                        "before calling "
+                        "'update_subtask_state'. Do NOT "
+                        "start execution until the user "
+                        "confirms."
+                    )
+        elif (
+            getattr(plan_notebook, "_plan_tool_gate", False)
+            and tool_name != "create_plan"
+        ):
+            blocked_reason = (
+                f"Tool '{tool_name}' is not available right now. "
+                "You MUST call 'create_plan' first to define the "
+                "plan and its subtasks. Do NOT call browser_use, "
+                "web_search, or any other tool before 'create_plan'. "
+                "Decompose the user's request into a **logical pipeline**: "
+                "each subtask needs a clear name, description, and measurable "
+                "expected_outcome; order steps so dependencies run earlier "
+                "(understand → act → verify → report). Put research, repo "
+                "reading, and heavy tooling into named subtasks for after "
+                "user confirmation. "
+                "Write plan and subtask text in the same language as the "
+                "user's request when it is identifiable."
+            )
+
+    return blocked_reason
 
 
 def _compact_plan_text(plan: "Plan") -> str:
@@ -473,13 +676,16 @@ if _HAS_DEFAULT_HINT:
         no_plan: str | None = (
             "There is no active plan yet.\n"
             + _PLAN_RESPONSE_LANGUAGE_BLOCK
-            + "If and only if the user is asking for a structured plan "
-            "or step-by-step breakdown (e.g. a /plan-style request), "
-            "call 'create_plan' next. Do NOT call browser_use, web_search, "
-            "or similar tools before 'create_plan'; put browsing, repo "
-            "research, and heavy tooling into explicit todo subtasks that "
-            "run after the user confirms the plan.\n"
-            "If the user is not requesting a plan, ignore this block.\n"
+            + "CRITICAL: You are in explicit /plan mode now. In THIS turn, "
+            "you MUST call 'create_plan' to create the plan state.\n"
+            "CRITICAL: Text-only plan drafts are invalid here because they do "
+            "not create backend plan state and the Plan panel cannot sync.\n"
+            "Do NOT ask for confirmation before calling 'create_plan'. "
+            "Confirmation is required only after 'create_plan' succeeds.\n"
+            "Do NOT call browser_use, web_search, grep_search, glob_search, "
+            "read_file, or similar non-plan tools before 'create_plan'; put "
+            "research and heavy tooling into explicit todo subtasks for after "
+            "plan confirmation.\n"
             "\n"
             "When you call 'create_plan', decompose the user's instruction "
             "into a **coherent, fine-grained pipeline**:\n"
@@ -543,7 +749,30 @@ if _HAS_DEFAULT_HINT:
             + "The previous plan was already finished or cancelled. "
             "Do NOT continue old plan subtasks unless the user explicitly "
             "asks to resume that plan or starts a new /plan request.\n"
+            "Plans are session-scoped and ephemeral (stored in memory only). "
+            "Each new session starts fresh without any historical plans.\n"
+            "Do NOT proactively inspect workspace history to infer intent "
+            "(for example broad glob/grep scans over session logs). "
             "Prioritize answering the user's latest message directly.\n"
+        )
+
+        fresh_session_no_plan_guard: str | None = (
+            "This is a fresh session with no active plan.\n"
+            + _PLAN_RESPONSE_LANGUAGE_BLOCK
+            + "Do NOT attempt to continue historical work by reading memory "
+            "files, searching old logs, or calling historical plan tools. "
+            "Treat this session as context-empty unless the user explicitly "
+            "provides prior context in the current conversation.\n"
+            "Do NOT proactively run workspace-probing tools (such as "
+            "glob_search, grep_search, or broad read_file scans) just to "
+            "guess user intent.\n"
+            "If the user says only short ambiguous triggers (e.g. "
+            "'continue', '继续执行', 'start', '开始'), ask one concise "
+            "clarification question first and do not call tools before that "
+            "clarification.\n"
+            "If the user gives a clear new task, execute it with targeted "
+            "scope only, and avoid session-history paths (sessions/, memory/, "
+            "plans/, logs/) unless the user explicitly requests them.\n"
         )
 
         # One-shot prefix injected on the first reasoning hint after the
@@ -605,11 +834,29 @@ if _HAS_DEFAULT_HINT:
                     self.no_plan
                     if should_emit_no_plan_hint(nb)
                     else (
-                        self.recently_finished_no_plan_guard
-                        if should_emit_recently_finished_plan_guard(nb)
-                        else None
+                        self.fresh_session_no_plan_guard
+                        if should_emit_fresh_session_no_plan_guard(nb)
+                        else (
+                            self.recently_finished_no_plan_guard
+                            if should_emit_recently_finished_plan_guard(nb)
+                            else None
+                        )
                     )
                 )
+                if (
+                    hint
+                    and nb is not None
+                    and bool(
+                        getattr(nb, "_plan_fresh_session_no_plan", False),
+                    )
+                ):
+                    # Ensure same-turn auto-continue does not run extra
+                    # reasoning immediately after this fresh-session guard.
+                    # pylint: disable-next=protected-access
+                    nb._plan_fresh_session_block_auto_continue = True
+                    # Consume one-shot fresh-session guard.
+                    # pylint: disable-next=protected-access
+                    nb._plan_fresh_session_no_plan = False
             else:
                 _, n_ip, n_done, n_abn, ip_idx = _count_states(plan)
                 if n_ip == 0:

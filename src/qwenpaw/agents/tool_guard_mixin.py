@@ -370,7 +370,10 @@ class ToolGuardMixin:
         from qwenpaw.plan.repeat_guard import check_plan_repeat_guard
 
         nb = getattr(self, "plan_notebook", None)
-        gate_msg = check_plan_tool_gate(nb, tool_name)
+        gate_msg = check_plan_tool_gate(
+            nb,
+            tool_name,
+        )
         if gate_msg is not None:
             return _GuardAction(
                 "plan_gated",

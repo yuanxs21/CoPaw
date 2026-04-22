@@ -19,7 +19,11 @@ from ...constant import EnvVarLoader
 from ..agent_context import get_agent_for_request
 from ..auth import _get_jwt_secret, has_registered_users, is_auth_enabled
 from ...plan import set_plan_gate
-from ...plan.session_sync import persist_plan_notebook_to_session
+from ...plan.session_sync import (
+    has_plan_snapshot,
+    hydrate_plan_from_store,
+    persist_plan_notebook_to_session,
+)
 from ...plan.schemas import (
     FinishPlanRequest,
     PlanConfigUpdateRequest,
@@ -157,23 +161,15 @@ async def _hydrate_plan_notebook_from_session(
     workspace,
     plan_notebook,
 ) -> None:
-    """Load ``plan_notebook`` from the session file before HTTP mutations."""
-    session_id, user_id = _session_scope_from_request(request)
-    runner = getattr(workspace, "runner", None)
-    sess = getattr(runner, "session", None) if runner is not None else None
-    if not session_id or sess is None or plan_notebook is None:
+    """Load ``plan_notebook`` from ephemeral session plan store."""
+    _ = workspace
+    session_id, _ = _session_scope_from_request(request)
+    if not session_id or plan_notebook is None:
         return
-    try:
-        await sess.load_session_state(
-            session_id=session_id,
-            user_id=user_id,
-            plan_notebook=plan_notebook,
-        )
-    except KeyError as e:
-        logger.warning(
-            "plan hydrate skipped (schema mismatch or missing key): %s",
-            e,
-        )
+    hydrate_plan_from_store(
+        session_id=session_id,
+        plan_notebook=plan_notebook,
+    )
 
 
 async def _persist_plan_notebook_to_session(
@@ -198,6 +194,217 @@ async def _persist_plan_notebook_to_session(
             status_code=500,
             detail="Failed to persist plan notebook to session",
         ) from e
+
+
+async def _is_task_already_cancelling(tracker, run_key: str) -> bool:
+    """Return True only when the tracked task is already being cancelled.
+
+    Uses Python 3.11+ ``Task.cancelling()``; on older runtimes returns
+    ``False`` so callers fall back to an explicit cancel. Read under the
+    tracker lock to keep state inspection consistent with mutations.
+    """
+    try:
+        async with tracker.lock:
+            state = getattr(tracker, "_runs", {}).get(run_key)
+            if state is None or state.task.done():
+                return False
+            cancelling_fn = getattr(state.task, "cancelling", None)
+            if not callable(cancelling_fn):
+                return False
+            try:
+                return cancelling_fn() > 0
+            except Exception:  # pylint: disable=broad-except
+                return False
+    except Exception:  # pylint: disable=broad-except
+        return False
+
+
+async def _stop_session_task_if_running(
+    workspace,
+    *,
+    channel: str,
+    session_id: str,
+) -> bool:
+    """Best-effort cancel + queue clear for panel-driven abandon."""
+    if not session_id:
+        return False
+
+    stopped = await _stop_session_runtime_task(
+        workspace,
+        channel=channel,
+        session_id=session_id,
+    )
+    await _clear_session_pending_queue(
+        workspace,
+        channel=channel,
+        session_id=session_id,
+    )
+    return stopped
+
+
+async def _stop_session_runtime_task(
+    workspace,
+    *,
+    channel: str,
+    session_id: str,
+) -> bool:
+    """Cancel chat-bound and external runtime tasks for one session."""
+    tracker = getattr(workspace, "task_tracker", None)
+    chat_manager = getattr(workspace, "chat_manager", None)
+    if tracker is None or chat_manager is None:
+        return False
+
+    chat_id = await _resolve_chat_id(chat_manager, session_id, channel)
+    stopped = await _stop_chat_task_if_needed(tracker, chat_id)
+    await _stop_scoped_external_tasks(tracker, channel, session_id)
+    return stopped
+
+
+async def _resolve_chat_id(chat_manager, session_id: str, channel: str):
+    try:
+        return await chat_manager.get_chat_id_by_session(session_id, channel)
+    except Exception:  # pylint: disable=broad-except
+        logger.warning(
+            "plan finish: failed to resolve chat_id for session stop",
+            exc_info=True,
+        )
+        return None
+
+
+async def _stop_chat_task_if_needed(tracker, chat_id: str | None) -> bool:
+    if not chat_id:
+        return False
+    if await _is_task_already_cancelling(tracker, chat_id):
+        # chat/stop is already cancelling this task; avoid double cancel
+        # so AgentException emission is not suppressed.
+        return True
+    try:
+        return await tracker.request_stop(chat_id)
+    except Exception:  # pylint: disable=broad-except
+        logger.warning(
+            "plan finish: chat_id stop failed for %s",
+            chat_id,
+            exc_info=True,
+        )
+        return False
+
+
+async def _stop_scoped_external_tasks(
+    tracker,
+    channel: str,
+    session_id: str,
+) -> None:
+    ext_prefix = f"ext:{channel}:{session_id}:"
+    try:
+        active_keys = await tracker.list_active_tasks()
+    except Exception:  # pylint: disable=broad-except
+        active_keys = []
+    for run_key in active_keys:
+        if not run_key.startswith(ext_prefix):
+            continue
+        try:
+            await tracker.request_stop(run_key)
+        except Exception:  # pylint: disable=broad-except
+            logger.warning(
+                "plan finish: scoped external stop failed for %s",
+                run_key,
+                exc_info=True,
+            )
+
+
+async def _clear_session_pending_queue(
+    workspace,
+    *,
+    channel: str,
+    session_id: str,
+) -> None:
+    channel_manager = getattr(workspace, "channel_manager", None)
+    if channel_manager is None:
+        return
+    try:
+        await channel_manager.clear_queue(channel, session_id, 20)
+    except Exception:  # pylint: disable=broad-except
+        logger.warning(
+            "plan finish: clear_queue failed for %s/%s",
+            channel,
+            session_id,
+            exc_info=True,
+        )
+
+
+def _bound_session_id(plan_notebook) -> str:
+    raw = getattr(plan_notebook, "_qwenpaw_plan_bound_session_id", "")
+    return raw if isinstance(raw, str) else ""
+
+
+def _has_active_subtask(plan_notebook) -> bool:
+    cur = getattr(plan_notebook, "current_plan", None)
+    if cur is None:
+        return False
+    subtasks = getattr(cur, "subtasks", None) or []
+    return any(getattr(st, "state", None) == "in_progress" for st in subtasks)
+
+
+async def _prepare_current_plan_for_session(
+    request: Request,
+    workspace,
+    plan_notebook,
+    *,
+    session_id: str,
+    strict: bool,
+) -> bool:
+    bound_sid = _bound_session_id(plan_notebook)
+
+    # Session isolation: requests without session_id cannot read plans
+    # that are bound to a specific session (prevents cross-session leaks).
+    if not session_id:
+        if bound_sid:
+            # The in-memory plan belongs to a specific session, but this
+            # request has no session_id → block to prevent leak.
+            if strict:
+                raise HTTPException(status_code=404, detail="No active plan")
+            return False
+        # No session_id and no bound plan → allow (legacy compatibility)
+        return True
+
+    has_snapshot = has_plan_snapshot(session_id)
+
+    # Cross-session isolation: if the in-memory plan belongs to a different
+    # session, block read unless we have a snapshot for the current session.
+    if bound_sid and bound_sid != session_id:
+        if not has_snapshot:
+            if strict:
+                raise HTTPException(status_code=404, detail="No active plan")
+            return False
+        # Fall through to hydrate from snapshot
+
+    in_memory_authoritative = (
+        bool(bound_sid) and bound_sid == session_id
+    ) or _has_active_subtask(plan_notebook)
+
+    if has_snapshot and not in_memory_authoritative:
+        channel = _channel_from_request(request)
+        with plan_sse_scope(channel, session_id):
+            await _hydrate_plan_notebook_from_session(
+                request,
+                workspace,
+                plan_notebook,
+            )
+        return True
+
+    if not has_snapshot:
+        # If the notebook is already bound to this same session and has
+        # an in-memory plan (first turn not persisted yet), allow read.
+        # Otherwise return empty for this session without mutating the
+        # shared notebook instance.
+        in_memory_same_session = plan_notebook.current_plan is not None and (
+            not bound_sid or bound_sid == session_id
+        )
+        if not in_memory_same_session:
+            if strict:
+                raise HTTPException(status_code=404, detail="No active plan")
+            return False
+    return True
 
 
 @router.get(
@@ -230,49 +437,27 @@ async def get_current_plan(
             raise HTTPException(status_code=404, detail="No active plan")
         return None
 
-    session_id, user_id = _session_scope_from_request(request)
-    if session_id:
-        runner = getattr(workspace, "runner", None)
-        sess = getattr(runner, "session", None) if runner is not None else None
-        if sess is not None:
-            # Read-only endpoint: never mutate/clear another session's
-            # in-memory
-            # plan when this session has no snapshot. This avoids cross-channel
-            # races (e.g. console polling clobbering a running DingTalk plan).
-            raw = await sess.get_session_state_dict(session_id, user_id)
-            has_snapshot = "plan_notebook" in raw
-
-            if has_snapshot:
-                channel = _channel_from_request(request)
-                with plan_sse_scope(channel, session_id):
-                    await _hydrate_plan_notebook_from_session(
-                        request,
-                        workspace,
-                        nb,
-                    )
-            else:
-                # If the notebook is already bound to this same session and has
-                # an in-memory plan (first turn not persisted yet), allow read.
-                # Otherwise return empty for this session without mutating the
-                # shared notebook instance.
-                bound_sid = getattr(nb, "_copaw_plan_bound_session_id", "")
-                if not isinstance(bound_sid, str):
-                    bound_sid = ""
-                in_memory_same_session = nb.current_plan is not None and (
-                    not bound_sid or bound_sid == session_id
-                )
-                if not in_memory_same_session:
-                    if strict:
-                        raise HTTPException(
-                            status_code=404,
-                            detail="No active plan",
-                        )
-                    return None
+    session_id, _ = _session_scope_from_request(request)
+    visible = await _prepare_current_plan_for_session(
+        request,
+        workspace,
+        nb,
+        session_id=session_id,
+        strict=strict,
+    )
+    if not visible:
+        return None
 
     if nb.current_plan is None:
         if strict:
             raise HTTPException(status_code=404, detail="No active plan")
         return None
+    if session_id:
+        bound_sid = _bound_session_id(nb)
+        if bound_sid and bound_sid != session_id:
+            if strict:
+                raise HTTPException(status_code=404, detail="No active plan")
+            return None
     return plan_to_response(nb.current_plan)
 
 
@@ -326,6 +511,12 @@ async def finish_plan(body: FinishPlanRequest, request: Request):
         )
     channel = _channel_from_request(request)
     session_id, _ = _session_scope_from_request(request)
+    if body.state == "abandoned":
+        await _stop_session_task_if_running(
+            workspace,
+            channel=channel,
+            session_id=session_id,
+        )
     with plan_sse_scope(channel, session_id):
         await _hydrate_plan_notebook_from_session(request, workspace, nb)
         await nb.finish_plan(state=body.state, outcome=body.outcome)

@@ -28,6 +28,7 @@ from ...plan.broadcast import plan_sse_scope
 from ...plan.session_sync import (
     broadcast_plan_notebook_snapshot,
     clear_plan_notebook_if_session_has_no_snapshot,
+    hydrate_plan_from_store,
     persist_plan_notebook_to_session,
 )
 
@@ -330,22 +331,13 @@ async def run_command_path(  # pylint: disable=too-many-statements,too-many-bran
                 session=sess,
                 plan_notebook=plan_nb,
                 session_id=session_id,
-                user_id=user_id,
                 agent_id=runner.agent_id,
             )
             if plan_nb is not None:
-                try:
-                    await sess.load_session_state(
-                        session_id=session_id,
-                        user_id=user_id,
-                        plan_notebook=plan_nb,
-                    )
-                except KeyError as e:
-                    logger.warning(
-                        "run_command_path: load_session_state(plan_notebook) "
-                        "skipped (schema mismatch): %s",
-                        e,
-                    )
+                hydrate_plan_from_store(
+                    session_id=session_id,
+                    plan_notebook=plan_nb,
+                )
                 broadcast_plan_notebook_snapshot(plan_nb, runner.agent_id)
 
         # Daemon path

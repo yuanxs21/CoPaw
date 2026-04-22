@@ -46,6 +46,8 @@ from ...plan import set_plan_gate
 from ...plan.session_sync import (
     broadcast_plan_notebook_snapshot,
     clear_plan_notebook_if_session_has_no_snapshot,
+    hydrate_plan_from_store,
+    persist_plan_notebook_to_session,
 )
 from ...constant import (
     TOOL_GUARD_APPROVAL_TIMEOUT_SECONDS,
@@ -648,12 +650,10 @@ class AgentRunner(Runner):
 
             load_kwargs = {"agent": agent}
             if self._plan_notebook is not None:
-                load_kwargs["plan_notebook"] = self._plan_notebook
                 await clear_plan_notebook_if_session_has_no_snapshot(
                     session=self.session,
                     plan_notebook=self._plan_notebook,
                     session_id=session_id,
-                    user_id=user_id,
                     agent_id=self.agent_id,
                 )
             try:
@@ -669,6 +669,10 @@ class AgentRunner(Runner):
                     e,
                 )
             if self._plan_notebook is not None:
+                hydrate_plan_from_store(
+                    session_id=session_id,
+                    plan_notebook=self._plan_notebook,
+                )
                 broadcast_plan_notebook_snapshot(
                     self._plan_notebook,
                     self.agent_id,
@@ -764,14 +768,24 @@ class AgentRunner(Runner):
             if _plan_sse_exit is not None:
                 _plan_sse_exit.close()
             if agent is not None and session_state_loaded:
-                save_kwargs = {"agent": agent}
-                if self._plan_notebook is not None:
-                    save_kwargs["plan_notebook"] = self._plan_notebook
                 await self.session.save_session_state(
                     session_id=session_id,
                     user_id=user_id,
-                    **save_kwargs,
+                    agent=agent,
                 )
+                if self._plan_notebook is not None:
+                    try:
+                        await persist_plan_notebook_to_session(
+                            session=self.session,
+                            plan_notebook=self._plan_notebook,
+                            session_id=session_id,
+                            user_id=user_id,
+                        )
+                    except Exception:
+                        logger.warning(
+                            "Failed to persist plan_notebook after agent run",
+                            exc_info=True,
+                        )
 
             if self._chat_manager is not None and chat is not None:
                 await self._chat_manager.touch_chat(chat.id)

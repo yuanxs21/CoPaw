@@ -13,6 +13,7 @@ import asyncio
 import contextvars
 import logging
 from contextlib import contextmanager
+import copy
 from typing import Any, Iterator
 
 logger = logging.getLogger(__name__)
@@ -33,6 +34,8 @@ _UNSET = object()
 # memory indefinitely.  256 plan-update events is generous for any
 # realistic console session; older events are dropped with a warning.
 _SSE_QUEUE_MAXSIZE = 256
+_SSE_LAST_PAYLOAD_MAX_BUCKETS = 512
+_plan_last_payload: dict[str, dict | None] = {}
 
 
 def plan_sse_scope_key(channel: str, session_id: str) -> str | None:
@@ -46,6 +49,18 @@ def plan_sse_scope_key(channel: str, session_id: str) -> str | None:
         return None
     ch = (channel or "").strip() or "console"
     return f"{ch}:{sid}"
+
+
+def current_plan_scope_session_id() -> str:
+    """Return session_id from current ``plan_sse_scope`` context, if any."""
+    raw = _plan_sse_scope.get()
+    if not isinstance(raw, str) or not raw:
+        return ""
+    parts = raw.rsplit(":", 1)
+    if len(parts) != 2:
+        return ""
+    sid = parts[1].strip()
+    return sid
 
 
 def _bucket_key(agent_id: str, scope_key: str | None) -> str:
@@ -79,6 +94,15 @@ def register_sse_client(
     )
     bkey = _bucket_key(agent_id, scope_key)
     _plan_update_queues.setdefault(bkey, set()).add(q)
+    if bkey in _plan_last_payload:
+        try:
+            q.put_nowait(copy.deepcopy(_plan_last_payload[bkey]))
+        except asyncio.QueueFull:
+            logger.warning(
+                "Plan SSE queue full on register for bucket %s, "
+                "dropping cached snapshot",
+                bkey,
+            )
     return q
 
 
@@ -119,6 +143,10 @@ def broadcast_plan_update(
         eff = scope_key  # type: ignore[assignment]
 
     bk = _bucket_key(agent_id, eff)
+    _plan_last_payload[bk] = copy.deepcopy(payload)
+    while len(_plan_last_payload) > _SSE_LAST_PAYLOAD_MAX_BUCKETS:
+        # Drop the oldest cached bucket to cap memory.
+        _plan_last_payload.pop(next(iter(_plan_last_payload)))
     clients = _plan_update_queues.get(bk)
     if not clients:
         return

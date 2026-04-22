@@ -29,8 +29,14 @@ _PLAN_TOOL_NAMES = frozenset(
         "create_plan",
         "revise_current_plan",
         "view_subtasks",
-        "view_historical_plans",
-        "recover_historical_plan",
+    },
+)
+
+_PLAN_STATE_TRANSITION_TOOLS = frozenset(
+    {
+        "update_subtask_state",
+        "finish_subtask",
+        "finish_plan",
     },
 )
 
@@ -55,8 +61,11 @@ def _reset_repeat_state(plan_notebook) -> None:
     # pylint: disable=protected-access
     plan_notebook._plan_repeat_fingerprint = None
     plan_notebook._plan_repeat_count = 0
+    plan_notebook._plan_state_repeat_fingerprint = None
+    plan_notebook._plan_state_repeat_count = 0
 
 
+# pylint: disable=too-many-branches,too-many-return-statements
 def check_plan_repeat_guard(
     plan_notebook,
     tool_name: str,
@@ -73,6 +82,45 @@ def check_plan_repeat_guard(
     if plan is None:
         return None
     if not any(st.state == "in_progress" for st in plan.subtasks):
+        return None
+
+    if tool_name in _PLAN_STATE_TRANSITION_TOOLS:
+        if not hasattr(plan_notebook, "_plan_state_repeat_fingerprint"):
+            _reset_repeat_state(plan_notebook)
+        fp = _tool_fingerprint(tool_name, tool_input)
+        state_last_fp = getattr(
+            plan_notebook,
+            "_plan_state_repeat_fingerprint",
+            None,
+        )
+        # pylint: disable=protected-access
+        if fp == state_last_fp:
+            plan_notebook._plan_state_repeat_count = (
+                int(
+                    getattr(
+                        plan_notebook,
+                        "_plan_state_repeat_count",
+                        0,
+                    ),
+                )
+                + 1
+            )
+        else:
+            plan_notebook._plan_state_repeat_fingerprint = fp
+            plan_notebook._plan_state_repeat_count = 1
+
+        state_count = int(
+            getattr(plan_notebook, "_plan_state_repeat_count", 0),
+        )
+        if state_count >= _REPEAT_THRESHOLD:
+            return (
+                "Repeated identical plan state-transition calls detected. "
+                "Do not keep calling the same "
+                f"'{tool_name}' with identical inputs. "
+                "Call 'view_subtasks' to refresh current states, then either "
+                "advance to the correct next transition or explain to the "
+                "user what is blocked."
+            )
         return None
 
     if tool_name in _PLAN_TOOL_NAMES:

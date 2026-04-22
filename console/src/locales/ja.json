@@ -1321,6 +1321,9 @@
     "stopConfirm": "このプランを停止しますか？プランは放棄としてマークされます。",
     "stoppedSuccess": "プランを停止しました",
     "stoppedError": "プランの停止に失敗しました",
+    "loadingConfig": "プラン設定を読み込み中\u2026",
+    "cancelConfirm": "実行前にこのプランをキャンセルしますか？",
+    "cancelConfirmHint": "プランは放棄されます。後で新しいプランを作成できます。",
     "cancelledSuccess": "プランをキャンセルしました",
     "cancelledError": "プランのキャンセルに失敗しました"
   },

@@ -40,6 +40,4 @@ export interface FinishPlanRequest {
 export interface PlanConfig {
   enabled: boolean;
   max_subtasks: number | null;
-  storage_type: "memory" | "file";
-  storage_path: string | null;
 }

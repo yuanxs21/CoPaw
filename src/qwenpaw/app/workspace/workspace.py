@@ -147,8 +147,6 @@ class Workspace:
 
         notebook = create_plan_notebook(
             config=config.plan,
-            agent_id=ws.agent_id,
-            working_dir=ws.workspace_dir,
         )
         if notebook is None:
             return None
@@ -166,13 +164,19 @@ class Workspace:
                         plan.id,
                         states,
                     )
+                    broadcast_plan_update(agent_id, payload)
                 else:
                     payload = None
                     logger.info(
                         "Plan change hook: agent_id=%s plan cleared",
                         agent_id,
                     )
-                broadcast_plan_update(agent_id, payload)
+                    # When plan is cleared (finish_plan), broadcast to both
+                    # scoped (from context) and legacy (agent_id only) buckets
+                    # so SSE clients with slight scope mismatches still receive
+                    # the null update and can clear their UI.
+                    broadcast_plan_update(agent_id, payload)
+                    broadcast_plan_update(agent_id, payload, scope_key=None)
             except Exception:
                 logger.warning(
                     "Failed to broadcast plan update",

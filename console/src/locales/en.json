@@ -1489,6 +1489,9 @@
     "stopConfirm": "Stop this plan? The plan will be marked as abandoned.",
     "stoppedSuccess": "Plan has been stopped",
     "stoppedError": "Failed to stop plan",
+    "loadingConfig": "Loading plan settings\u2026",
+    "cancelConfirm": "Cancel this plan before execution?",
+    "cancelConfirmHint": "The plan will be abandoned. You can create a new plan later.",
     "cancelledSuccess": "Plan cancelled",
     "cancelledError": "Failed to cancel plan"
   },

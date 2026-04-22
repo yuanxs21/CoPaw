@@ -6,9 +6,7 @@ import {
   Switch,
   message,
 } from "@agentscope-ai/design";
-import { Input } from "antd";
-import { Radio, Spin, Typography } from "antd";
-import type { RadioChangeEvent } from "antd/es/radio";
+import { Spin, Typography } from "antd";
 import { useTranslation } from "react-i18next";
 import api from "../../../../api";
 import type { PlanConfig } from "../../../../api/types";
@@ -23,8 +21,6 @@ export function PlanConfigCard() {
   const [config, setConfig] = useState<PlanConfig>({
     enabled: false,
     max_subtasks: null,
-    storage_type: "memory",
-    storage_path: null,
   });
 
   const fetchConfig = useCallback(async () => {
@@ -80,32 +76,7 @@ export function PlanConfigCard() {
     [config],
   );
 
-  const handleStorageTypeChange = useCallback(
-    (e: RadioChangeEvent) => {
-      const value = (e.target.value ?? "memory") as "memory" | "file";
-      const updated = { ...config, storage_type: value };
-      setConfig(updated);
-      save(updated);
-    },
-    [config, save],
-  );
-
-  const handleStoragePathChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const v = e.target.value.trim();
-      setConfig((prev) => ({
-        ...prev,
-        storage_path: v === "" ? null : v,
-      }));
-    },
-    [],
-  );
-
   const handleMaxSubtasksBlur = useCallback(() => {
-    save(config);
-  }, [config, save]);
-
-  const handleStoragePathBlur = useCallback(() => {
     save(config);
   }, [config, save]);
 
@@ -159,51 +130,16 @@ export function PlanConfigCard() {
               "None (Unlimited)",
             )}
           />
-        </Form.Item>
-
-        <Form.Item label={t("agentConfig.planStorageType", "Plan Storage")}>
-          <Radio.Group
-            value={config.storage_type}
-            onChange={handleStorageTypeChange}
-            disabled={!config.enabled || saving}
+          <Text
+            type="secondary"
+            style={{ display: "block", marginTop: 4, fontSize: 12 }}
           >
-            <Radio value="memory">
-              {t(
-                "agentConfig.planStorageMemory",
-                "In Memory (resets on restart)",
-              )}
-            </Radio>
-            <Radio value="file">
-              {t("agentConfig.planStorageFile", "Persistent (saved to disk)")}
-            </Radio>
-          </Radio.Group>
+            {t(
+              "agentConfig.planStorageNote",
+              "Plans are stored in memory and cleared on restart.",
+            )}
+          </Text>
         </Form.Item>
-
-        {config.storage_type === "file" && (
-          <Form.Item
-            label={t("agentConfig.planStoragePath", "Plan storage file path")}
-          >
-            <Input
-              value={config.storage_path ?? ""}
-              onChange={handleStoragePathChange}
-              onBlur={handleStoragePathBlur}
-              disabled={!config.enabled || saving}
-              placeholder={t(
-                "agentConfig.planStoragePathPlaceholder",
-                "Leave empty to use the server default path",
-              )}
-            />
-            <Text
-              type="secondary"
-              style={{ display: "block", marginTop: 4, fontSize: 12 }}
-            >
-              {t(
-                "agentConfig.planStoragePathDesc",
-                "Relative paths are resolved under the agent workspace.",
-              )}
-            </Text>
-          </Form.Item>
-        )}
       </Form>
     </Card>
   );
