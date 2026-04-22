@@ -131,6 +131,12 @@ class JsonSubtaskPlanNotebook(PlanNotebook):
                 self._plan_state_repeat_fingerprint = None
             if hasattr(self, "_plan_state_repeat_count"):
                 self._plan_state_repeat_count = 0
+            if hasattr(self, "_plan_repeat_force_finish"):
+                self._plan_repeat_force_finish = False
+            if hasattr(self, "_plan_repeat_force_tool"):
+                self._plan_repeat_force_tool = ""
+            if hasattr(self, "_plan_repeat_force_subtask_idx"):
+                self._plan_repeat_force_subtask_idx = -1
             return
         payload = dict(state_dict or {})
         marker = bool(payload.pop("_plan_recently_finished", False))
@@ -139,6 +145,12 @@ class JsonSubtaskPlanNotebook(PlanNotebook):
         self._plan_fresh_session_no_plan = False
         self._plan_fresh_session_block_auto_continue = False
         self._plan_fresh_session_probe_guard = False
+        if hasattr(self, "_plan_repeat_force_finish"):
+            self._plan_repeat_force_finish = False
+        if hasattr(self, "_plan_repeat_force_tool"):
+            self._plan_repeat_force_tool = ""
+        if hasattr(self, "_plan_repeat_force_subtask_idx"):
+            self._plan_repeat_force_subtask_idx = -1
 
     async def create_plan(
         self,

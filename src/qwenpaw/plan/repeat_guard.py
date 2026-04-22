@@ -63,6 +63,17 @@ def _reset_repeat_state(plan_notebook) -> None:
     plan_notebook._plan_repeat_count = 0
     plan_notebook._plan_state_repeat_fingerprint = None
     plan_notebook._plan_state_repeat_count = 0
+    plan_notebook._plan_repeat_force_finish = False
+    plan_notebook._plan_repeat_force_tool = ""
+    plan_notebook._plan_repeat_force_subtask_idx = -1
+
+
+def _in_progress_subtask_idx(plan) -> int | None:
+    """Return first in-progress subtask index, else ``None``."""
+    for idx, st in enumerate(getattr(plan, "subtasks", []) or []):
+        if getattr(st, "state", "") == "in_progress":
+            return idx
+    return None
 
 
 # pylint: disable=too-many-branches,too-many-return-statements
@@ -82,6 +93,8 @@ def check_plan_repeat_guard(
     if plan is None:
         return None
     if not any(st.state == "in_progress" for st in plan.subtasks):
+        if hasattr(plan_notebook, "_plan_repeat_force_finish"):
+            _reset_repeat_state(plan_notebook)
         return None
 
     if tool_name in _PLAN_STATE_TRANSITION_TOOLS:
@@ -124,7 +137,7 @@ def check_plan_repeat_guard(
         return None
 
     if tool_name in _PLAN_TOOL_NAMES:
-        if tool_name == "finish_subtask":
+        if tool_name in _PLAN_STATE_TRANSITION_TOOLS:
             _reset_repeat_state(plan_notebook)
         return None
 
@@ -151,6 +164,15 @@ def check_plan_repeat_guard(
 
     count = int(getattr(plan_notebook, "_plan_repeat_count", 0))
     if count >= _REPEAT_THRESHOLD:
+        ip_idx = _in_progress_subtask_idx(plan)
+        # Escalate from soft reminder to hard gate: subsequent non-plan-state
+        # tools are blocked in ``check_plan_tool_gate`` until state advances.
+        # pylint: disable=protected-access
+        plan_notebook._plan_repeat_force_finish = True
+        plan_notebook._plan_repeat_force_tool = tool_name
+        plan_notebook._plan_repeat_force_subtask_idx = (
+            int(ip_idx) if ip_idx is not None else -1
+        )
         logger.warning(
             "Plan repeat guard: blocking identical tool=%s "
             "after %d consecutive "
@@ -160,7 +182,7 @@ def check_plan_repeat_guard(
         )
         return (
             "Repeated identical tool calls while a plan subtask is "
-            "in_progress. "
+            "in_progress. Hard guard is now armed. "
             "If the last outputs already show success (e.g. tests "
             "passed, syntax "
             "OK), you MUST call 'finish_subtask' now with the current "

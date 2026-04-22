@@ -277,7 +277,28 @@ def _is_broad_probe_pattern(raw: Any) -> bool:
     return p in {"*", "**", "**/*", "*.*", "."}
 
 
-def check_plan_tool_gate(  # pylint: disable=too-many-branches
+def _is_shell_denied_by_policy() -> bool:
+    """Return whether ``execute_shell_command`` is in deny-list now."""
+    try:
+        from ..security.tool_guard.utils import resolve_denied_tools
+
+        denied = resolve_denied_tools()
+        return "execute_shell_command" in denied
+    except Exception:  # pylint: disable=broad-except
+        # Fail open here; tool guard will still enforce its own policy.
+        return False
+
+
+def _clear_repeat_force_finish(plan_notebook) -> None:
+    """Clear one-shot hard gate armed by repeat guard escalation."""
+    # pylint: disable=protected-access
+    plan_notebook._plan_repeat_force_finish = False
+    plan_notebook._plan_repeat_force_tool = ""
+    plan_notebook._plan_repeat_force_subtask_idx = -1
+
+
+# pylint: disable-next=too-many-branches,too-many-return-statements
+def check_plan_tool_gate(
     plan_notebook,
     tool_name: str,
 ):
@@ -375,6 +396,66 @@ def check_plan_tool_gate(  # pylint: disable=too-many-branches
             # drop stale flag.
             if getattr(plan_notebook, "_plan_tool_gate", False):
                 set_plan_gate(plan_notebook, False)
+
+            # Repeat-guard escalation: once the same non-plan tool has been
+            # blocked many times in a row, hard-lock this subtask until state
+            # transition tools are used (prefer ``finish_subtask``).
+            if bool(
+                getattr(
+                    plan_notebook,
+                    "_plan_repeat_force_finish",
+                    False,
+                ),
+            ):
+                plan = plan_notebook.current_plan
+                force_idx = int(
+                    getattr(
+                        plan_notebook,
+                        "_plan_repeat_force_subtask_idx",
+                        -1,
+                    ),
+                )
+                force_tool = str(
+                    getattr(plan_notebook, "_plan_repeat_force_tool", ""),
+                )
+                if (
+                    force_idx < 0
+                    or force_idx >= len(plan.subtasks)
+                    or plan.subtasks[force_idx].state != "in_progress"
+                ):
+                    _clear_repeat_force_finish(plan_notebook)
+                elif tool_name not in (
+                    "finish_subtask",
+                    "view_subtasks",
+                    "update_subtask_state",
+                    "finish_plan",
+                ):
+                    return (
+                        "Repeated-call hard guard is active for this "
+                        f"subtask (idx={force_idx}) after repeated "
+                        f"'{force_tool}' calls. "
+                        "Do NOT call non-plan tools now. Call "
+                        "'finish_subtask' with this subtask_idx and a concise "
+                        "outcome, or call 'view_subtasks' first to refresh "
+                        "state before transitioning."
+                    )
+
+            # Plan-time UX guard: if shell is globally denied by security
+            # policy, intercept it here so the model gets a plan-oriented
+            # instruction instead of repeatedly hitting auto-denied results.
+            if (
+                tool_name == "execute_shell_command"
+                and _is_shell_denied_by_policy()
+            ):
+                blocked_reason = (
+                    "Tool 'execute_shell_command' is denied by current "
+                    "security policy and cannot be approved via /approve. "
+                    "Do NOT retry this tool in this plan turn. "
+                    "Use other allowed tools to continue the subtask; "
+                    "if the subtask fundamentally requires shell execution, "
+                    "briefly explain the block and ask the user to adjust "
+                    "policy or change scope."
+                )
 
             # Block execution-starting tools while the plan awaits user
             # confirmation (all subtasks still ``todo`` and the just-created
@@ -636,6 +717,11 @@ if _HAS_DEFAULT_HINT:
             "4. When stuck after a few tries, call 'finish_subtask' with a "
             "partial outcome anyway. The next subtask activates "
             "automatically.\n"
+            "5. If the environment blocked a tool pending user approval "
+            "(e.g. shell command), do **not** try to evade the guard by "
+            "using other tools to reach the same risky outcome. Instruct "
+            "the user to send `/approve` (or the channel's equivalent) or "
+            "rephrase a safer approach **after** they consent.\n"
             "CRITICAL: Do NOT reply with text only. The ReAct loop stops "
             "if there is no tool call; that interrupts the plan on all "
             "channels.\n"

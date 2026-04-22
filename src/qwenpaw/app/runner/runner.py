@@ -331,6 +331,8 @@ class AgentRunner(Runner):
         self,
         session_id: str,
         query: str | None,
+        *,
+        abandon_stale: bool = False,
     ) -> tuple[Msg | None, bool, dict[str, Any] | None]:
         """Check for a pending tool-guard approval for *session_id*.
 
@@ -339,6 +341,8 @@ class AgentRunner(Runner):
         - ``(None, False, None)`` — no pending approval, continue normally.
         - ``(Msg, True, None)``   — denied; yield the Msg and stop.
         - ``(None, True, dict)``  — approved with stored tool call.
+        - ``(None, True, None)``  — pending cleared with no UI (see
+          *abandon_stale* when the user starts a new ``/plan`` request).
 
         Approvals are resolved FIFO per session (oldest pending first).
         """
@@ -351,6 +355,22 @@ class AgentRunner(Runner):
         pending = await svc.get_pending_by_session(session_id)
         if pending is None:
             return None, False, None
+
+        # User sent ``/plan <description>`` which rewrites the last turn to
+        # plain text. That must NOT be treated as "deny" for an older pending
+        # shell (or other) approval — otherwise we show "Tool denied" and
+        # never run the new plan flow.
+        if abandon_stale:
+            await svc.resolve_request(
+                pending.request_id,
+                ApprovalDecision.TIMEOUT,
+            )
+            logger.info(
+                "Pending approval for '%s' cleared (user started "
+                "/plan <description>; not a deny).",
+                pending.tool_name,
+            )
+            return None, True, None
 
         elapsed = time.time() - pending.created_at
         if elapsed > self._APPROVAL_TIMEOUT_SECONDS:
@@ -440,8 +460,11 @@ class AgentRunner(Runner):
         )
         query = _get_last_user_text(msgs)
         session_id = getattr(request, "session_id", "") or ""
+        plan_inline_entry = bool(
+            query and is_plan_with_inline_description(query),
+        )
 
-        if query and is_plan_with_inline_description(query):
+        if plan_inline_entry:
             if not await ensure_plan_mode_enabled(self):
                 err = Msg(
                     name="Friday",
@@ -468,7 +491,11 @@ class AgentRunner(Runner):
             approval_response,
             approval_consumed,
             approved_tool_call,
-        ) = await self._resolve_pending_approval(session_id, query)
+        ) = await self._resolve_pending_approval(
+            session_id,
+            query,
+            abandon_stale=plan_inline_entry,
+        )
         if approval_response is not None:
             yield approval_response, True
             user_id = getattr(request, "user_id", "") or ""

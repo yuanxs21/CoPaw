@@ -264,6 +264,14 @@ def _repeat_guard_reset(nb: Any) -> None:
         nb._plan_state_repeat_fingerprint = None
     if hasattr(nb, "_plan_state_repeat_count"):
         nb._plan_state_repeat_count = 0  # pylint: disable=protected-access
+    if hasattr(nb, "_plan_repeat_force_finish"):
+        # pylint: disable-next=protected-access
+        nb._plan_repeat_force_finish = False
+    if hasattr(nb, "_plan_repeat_force_tool"):
+        nb._plan_repeat_force_tool = ""  # pylint: disable=protected-access
+    if hasattr(nb, "_plan_repeat_force_subtask_idx"):
+        # pylint: disable-next=protected-access
+        nb._plan_repeat_force_subtask_idx = -1
 
 
 async def persist_plan_notebook_to_session(
