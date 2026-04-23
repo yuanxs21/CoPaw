@@ -36,6 +36,7 @@ logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from .runner import AgentRunner
+    from ...agents.context import AgentContext
 
 
 async def ensure_plan_mode_enabled(runner: "AgentRunner") -> bool:
